@@ -1,1588 +1,416 @@
-# wing-skin-crack-growth
+# STM-12 — Wing-Skin Crack Growth (Paris Law)
 
-Verified fatigue-crack-growth analysis for an idealized aircraft wing-skin crack
-under cyclic loading, built on linear-elastic fracture mechanics (LEFM) and the
-Paris law.
+A verified, deterministic **linear-elastic fracture mechanics (LEFM)** and
+**Paris-law** fatigue-crack-growth analysis for an idealized aircraft wing-skin
+crack, built up in five independently verified stages and finished with an
+integrated assessment.
 
-Python package: `crackgrowth` (src layout, no runtime dependencies).
+Pure Python, **no runtime dependencies**, **1213 automated tests**.
 
 ## Objective
 
-Predict the number of constant-amplitude load cycles required to grow a
-through-thickness crack in a wing skin from an assumed initial flaw size to the
-crack length at which the skin fractures, with every numerical result
-independently verified against a closed-form reference solution.
+> How do finite-width geometry amplification, fracture toughness, crack-growth
+> threshold, initial flaw size, and ordered variable-amplitude loading interact
+> to determine remaining crack-growth life in an idealized wing skin?
 
-The engineering question Milestone 2 answers:
+## Key result
 
-> At what crack length does the maximum tensile stress drive the mode-I stress
-> intensity up to the material's fracture toughness, and how many cycles remain
-> from the initial flaw to that boundary?
+Canonical case: centre through crack, half-length `a₀` = 1 mm in a `W` = 100 mm
+panel; illustrative `K_IC` = 30 MPa·√m, `ΔK_th` = 4 MPa·√m, Paris `m` = 3.
 
-The engineering question Milestone 3 answers:
+| Model stage | Geometry | Loading | End condition | Life |
+| --- | --- | --- | --- | ---: |
+| M1 constant `Y` | `Y` = 1 | constant amplitude | imposed `a` = 10 mm | 0.777 M cycles |
+| M2 fracture boundary | `Y` = 1 | constant amplitude | `K_max` = `K_IC` at 19.894 mm | 0.881 M |
+| M3 finite width | `Y(a)`, W = 100 mm | constant amplitude | `K_max` = `K_IC` at 17.094 mm | 0.842 M |
+| M4 `ΔK` threshold | `Y(a)`, W = 100 mm | constant amplitude | crack already active | 0.842 M (identical) |
+| M5 spectrum | `Y(a)`, W = 100 mm | 3-block variable amplitude | block-specific fracture | **6.283 M actual cycles** |
 
-> How much does finite panel width amplify stress intensity, reduce the
-> toughness-derived critical crack size, and shorten Paris-law life relative to
-> the infinite-plate `Y = 1` reference?
+> **Read the last row carefully.** The M5 cycle count is larger, but that does
+> **not** mean the spectrum is less damaging in any universal sense. M1–M4 all
+> apply the *same* constant-amplitude cycle (`Δσ` = 100 MPa). M5 is a *different*
+> loading history dominated by lower-range cycles, most of which start below the
+> threshold. These lives are not comparable at equal severity.
 
-The engineering question Milestone 4 answers:
+![Crack-growth life across the model progression](figures/fig1_life_progression.png)
 
-> Under constant-amplitude loading, does the initial crack have enough `ΔK` to
-> grow at all, and if so, how many cycles remain before the finite-width
-> toughness boundary is reached?
+**Headline findings**
 
-The engineering question Milestone 5 answers:
+- **Finite width** cuts the critical crack size by **14.1 %** and the
+  constant-amplitude life by **4.4 %**.
+- The **hard `ΔK` threshold is binary**: an active crack grows at exactly the
+  unmodified Paris rate; an arrested crack does not propagate at all.
+- Under the spectrum the **low-amplitude block starts arrested**, activates at
+  repeat 359, and then contributes **51.4 %** of the total crack extension.
+- The **severe block owns the smallest fracture boundary** (11.86 mm) and
+  triggers fracture — on its *first cycle* of the final pass.
+- **Sequence effects** arise only from evolving crack size and threshold/fracture
+  logic. There is no overload retardation or any other load-history memory.
+- Cycle-to-fracture differences below **one spectrum (0.177 % of life)** are
+  block quantisation, not physics.
 
-> For a repeating wing-skin load spectrum containing many low-amplitude cycles
-> and a smaller number of severe cycles, how does the crack evolve sequentially,
-> which load blocks actually drive growth, and after how many total cycles does
-> the crack reach a fracture boundary?
+## Engineering workflow
 
-## Scope (Milestone 1)
+```
+constant-Y Paris growth              (M1)  analytical + numerical life
+  -> toughness-derived critical size (M2)  K_max = K_IC, residual strength
+  -> finite-width Y(a)               (M3)  secant correction, log-grid integration
+  -> ΔK-threshold screening          (M4)  hard cutoff, active/arrested states
+  -> ordered block-spectrum growth   (M5)  sequential, per-block boundaries
+  -> integrated assessment           (M6)  this repository
+```
 
-Implemented:
+## Crack and unit conventions
 
-- crack geometry with a constant geometry factor `Y`
-- constant-amplitude cyclic stress representation
-- mode-I stress-intensity factor `K`
-- stress-intensity range `ΔK`
-- Paris-law material representation with explicit unit handling
-- crack-growth rate `da/dN`
-- deterministic numerical integration from `a₀` to a specified `a_f`
-- closed-form analytical reference for constant `Y`
-- stress-range and initial-crack-size sensitivity sweeps
-
-## Scope (Milestone 2)
-
-Added, without altering any Milestone 1 mechanics:
-
-- mode-I fracture-toughness material representation
-- a `K_max` fracture criterion (distinct from the `ΔK` growth driving force)
-- critical crack size derived from `K_IC`
-- residual strength as a function of crack size
-- fracture utilization and a preliminary screening margin
-- initial-flaw admissibility checks against the fracture boundary
-- crack-growth life integrated to the toughness-derived critical size
-- toughness, maximum-stress, geometry-factor and initial-flaw sensitivity sweeps
-- a residual-strength screening table
-
-Milestone 1's imposed 10 mm endpoint is retained unchanged for regression; it is
-superseded, not replaced.
-
-## Scope (Milestone 3)
-
-Added, without altering any Milestone 1 or 2 mechanics:
-
-- a finite-width centre-cracked panel geometry with a crack-size-dependent
-  geometry factor `Y(a)`
-- a geometry protocol so constant-`Y` and `Y(a)` models share one interface
-- finite-width `K`, `ΔK`, residual strength and fracture assessment
-- a bounded bisection solver for the critical crack size, since no closed form
-  survives `Y(a)`
-- a geometry-aware log-grid integrator, added alongside — not replacing — the
-  Milestone 1 linear-grid integrator
-- width, initial-flaw, stress and toughness sensitivity sweeps, a geometry
-  amplification table, and ligament diagnostics
-
-## Scope (Milestone 4)
-
-Added, without altering any Milestone 1–3 mechanics:
-
-- a constant-amplitude crack-growth threshold `ΔK_th`, applied as a **hard
-  cutoff** on a new code path
-- a threshold-aware growth rate, alongside the unchanged no-threshold rate
-- growth/no-growth classification: active, at threshold, arrested, at or beyond
-  the fracture boundary, or no tensile fracture boundary
-- exact (constant-`Y`) and numerically solved (finite-width) threshold crack size
-- a diagnostic comparison of the threshold and fracture boundaries
-- threshold, initial-flaw, stress, width and toughness sensitivity sweeps
-
-## Scope (Milestone 5)
-
-Added, without altering any Milestone 1–4 mechanics:
-
-- an ordered variable-amplitude block spectrum (`SpectrumBlock`, `LoadSpectrum`)
-- block advancement by **inverting** the verified life integral, not by an
-  explicit `a + n·(da/dN)` step
-- per-block threshold verdicts and per-block fracture boundaries
-- repeated-spectrum simulation with explicit end statuses
-- fracture located partway through a block, in actual cycles
-- growth-contribution accounting by block
-- a sequence-order study and spectrum sensitivity sweeps
-
-Not implemented — see [Limitations](#limitations).
-
-## Units and sign conventions
-
-All internal computation is SI. Nothing is stored in mixed units.
+All internal computation is SI. Engineering units appear only in output.
 
 | Quantity | Symbol | Unit |
 | --- | --- | --- |
-| Crack length | `a` | m |
-| Stress | `σ` | Pa |
+| Crack **half**-length | `a` | m |
+| Total crack length | `2a` | m |
+| Stress | `σ` | Pa (tension positive) |
 | Stress intensity | `K`, `ΔK` | Pa·√m |
 | Paris coefficient | `C` | m/cycle / (Pa·√m)^m |
-| Paris exponent | `m` | – |
 | Crack-growth rate | `da/dN` | m/cycle |
 | Life | `N` | cycles |
 
-Conventions:
+**`a` is always the HALF crack length.** A centre crack of half-length `a` in a
+panel of width `W` has total length `2a`, remaining ligament `W − 2a`, ligament
+fraction `1 − 2a/W`, and is admissible only while `0 < 2a < W`. Confusing `a`
+with `2a` is the easiest damaging error in this subject, so the convention is
+enforced at every boundary and locked by dedicated tests.
 
-- Tensile stress is **positive**; compressive stress is **negative**.
-- Mode-I crack opening is driven by tensile stress.
-- Crack length must be finite and strictly positive.
-- `a_final > a_initial` is required; equal or reversed limits are rejected.
-- A cycle requires `σ_min ≤ σ_max`.
-- Engineering units (mm, MPa, MPa·√m) appear only in printed output, where the
-  conversion is explicit.
+Tensile stress is positive, compression negative; `Δσ = σ_max − σ_min`,
+`σ_m = (σ_max + σ_min)/2`, `σ_a = Δσ/2`, `R = σ_min/σ_max`.
 
 ## Governing equations
 
-**Mode-I stress intensity** (constant geometry factor):
+**Stress intensity** — signed, so compression stays negative:
 
 ```
-K = Y · σ · sqrt(π · a)
+K(a)  = Y(a) · σ        · sqrt(π·a)
+ΔK(a) = Y(a) · Δσ       · sqrt(π·a)      growth driving force
+K_max(a) = Y(a) · σ_max · sqrt(π·a)      fracture driving force
 ```
 
-`K` is returned **signed**: positive in tension, negative in compression. No
-absolute value is applied silently. A negative `K` is a bookkeeping result, not
-an opening-mode driving force.
+**`ΔK` and `K_max` are never interchanged.** Growth is driven by the *range*;
+fracture by the *maximum*. At fixed `Δσ`, changing `σ_max` leaves the Paris
+growth rate at any crack size completely unchanged while moving the fracture
+boundary — verified to 12 significant figures.
 
-**Stress-intensity range:**
-
-```
-ΔK = Y · Δσ · sqrt(π · a),    Δσ = σ_max − σ_min
-```
-
-`Δσ` is the raw **algebraic** range. Milestone 1 does **not** model crack
-closure, so a compressive `σ_min` still contributes in full to `Δσ` and
-therefore inflates `ΔK`. Real aluminium behaviour would partially or wholly
-remove the compressive part of the cycle. No effective-`ΔK` model is offered.
-
-**Paris law:**
+**Paris law** (above threshold):
 
 ```
 da/dN = C · (ΔK)^m
 ```
 
-with `C > 0`, `m > 0`, both finite.
-
-**Fracture criterion (Milestone 2):**
-
-```
-K_max(a) = Y · σ_max · sqrt(π · a)
-
-fracture when   K_max = K_IC
-```
-
-**Two different driving forces.** Fatigue crack *growth* is driven by the
-stress-intensity **range** `ΔK`, which depends on `Δσ`. *Fracture* is driven by
-the **maximum** stress intensity in the cycle, `K_max`, which depends on `σ_max`
-alone. Using `ΔK` as a fracture criterion is a real and expensive error, and is
-guarded against by explicit tests. For constant `Y` the two are related by
+`C` is stored on the SI (Pa·√m) basis. Handbook values are quoted on the MPa·√m
+basis, and the conversion is a named, tested function — never inferred:
 
 ```
-ΔK(a) / K_max(a) = Δσ / σ_max
+C_SI = C_MPa / (10⁶)^m          →  1.0×10⁻¹¹ / 10¹⁸ = 1.0×10⁻²⁹  at m = 3
 ```
 
-so at the critical crack size `ΔK(a_c) = (Δσ / σ_max) · K_IC` — for the
-canonical cycle, exactly `5/6 · K_IC = 25 MPa·√m`, **not** `K_IC`.
+Mixing the two bases is an error of 10¹⁸ here, so it is guarded by test.
 
-## Finite-width crack convention (Milestone 3)
-
-Throughout this package **`a` is the HALF crack length**. A centre crack in a
-panel of width `W` therefore has:
-
-| Quantity | Expression |
-| --- | --- |
-| Total (tip-to-tip) crack length | `2a` |
-| Remaining total ligament | `W − 2a` |
-| Ligament fraction | `1 − 2a/W` |
-| Admissible range | `0 < 2a < W`, i.e. `0 < a < W/2` |
-
-This is the same meaning `a` carries in Milestones 1 and 2 — `Y = 1` is the
-*infinite-plate* centre crack of total length `2a` — so nothing about the
-interpretation of `a` changes. Silently switching between `a` and `2a` is one of
-the easiest and most damaging errors in this subject, so the convention is
-stated at every boundary and locked by dedicated tests. A 20 mm *half* crack
-fills 40 % of a 100 mm panel, not 20 %.
-
-The bound `a < W/2` is **enforced, not clamped**: beyond it no ligament remains
-and the correction is meaningless.
-
-## Centre-crack geometry factor
-
-The standard secant finite-width correction:
+**Fracture boundary and residual strength:**
 
 ```
-Y(a, W) = sqrt( sec( π · a / W ) ) = 1 / sqrt( cos( π · a / W ) )
+K_max(a_c) = K_IC        σ_res(a) = K_IC / (Y(a)·sqrt(π·a))
 ```
 
-| `a/W` | `Y` |
-| --- | --- |
-| 0.01 | 1.000247 |
-| 0.05 | 1.006213 |
-| 0.10 | 1.025408 |
-| 0.20 | 1.111786 |
-| 0.30 | 1.304340 |
-| 0.40 | 1.798907 |
-| 0.45 | 2.528330 |
-| 0.49 | 5.642360 |
-
-Behaviour, all verified by test: `Y → 1` as `a/W → 0`; `Y > 1` for any finite
-non-zero `a/W`; `Y` increases monotonically with `a/W`; and `Y → ∞` as
-`a → W/2`. No other empirical correction factor is applied.
-
-Both geometries then use the *same* stress-intensity equation:
+Both are the same equation solved two ways: `σ_res(a_c) = σ_max` exactly.
+A useful invariant that survives any geometry, because `Y(a_c)` cancels:
 
 ```
-K = Y(a) · σ · sqrt(π · a)        ΔK = Y(a) · Δσ · sqrt(π · a)
+ΔK(a_c) / K_IC = Δσ / σ_max          (= 5/6 for the canonical cycle)
 ```
 
-`K` remains signed, so compression stays negative, and `ΔK` remains the
-algebraic range — still no crack closure. Because `Y(a) ≥ 1`, the finite-width
-`ΔK` is never below the infinite-plate value at the same crack length, and
-approaches it as `W → ∞`.
-
-## Geometry convention (Milestones 1–2)
-
-Milestone 1 supports one deliberately simple geometry: `ThroughCrackGeometry`,
-an idealized through crack characterised by a single constant dimensionless
-geometry factor `Y`.
-
-The canonical value `Y = 1.0` corresponds to a central through crack of length
-`2a` in an **infinite** plate. There is no finite-width correction, no surface
-or corner-crack shape factor, and no crack-length-dependent `Y(a)`. `Y` is a
-constant supplied by the analyst and is an explicit engineering assumption.
-
-## Paris-law convention and the C-unit conversion
-
-`ParisLaw` always stores `C` on the **SI basis**, i.e. with `ΔK` in Pa·√m and
-`da/dN` in m/cycle. Because `m` is dimensionless, `C` carries units of
-`m/cycle / (Pa·√m)^m` and its numerical value depends on `m`.
-
-Handbook coefficients are almost always quoted on the MPa·√m basis:
+**Threshold** — a deliberately simple hard cutoff:
 
 ```
-da/dN [m/cycle] = C_MPa · (ΔK [MPa·√m])^m
+ΔK ≤ ΔK_th  →  da/dN = 0            (equality arrests)
+ΔK >  ΔK_th  →  da/dN = C·(ΔK)^m     (the UNMODIFIED Paris rate)
 ```
 
-Substituting `ΔK[MPa·√m] = ΔK[Pa·√m] / 10⁶`:
+No `C·(ΔK − ΔK_th)^m` law, no closure correction, no near-threshold roll-off.
+
+## Finite-width geometry
+
+The standard secant correction for a centre-cracked panel:
 
 ```
-da/dN = C_MPa · (ΔK[Pa·√m] / 10⁶)^m
-      = (C_MPa / (10⁶)^m) · (ΔK[Pa·√m])^m
+Y(a, W) = 1 / sqrt(cos(π·a/W))
 ```
 
-hence the exact conversion
+`Y → 1` as `a/W → 0`; `Y` rises monotonically; `Y → ∞` as `a → W/2`, where the
+ligament vanishes. With `Y = Y(a)` the closed-form critical size no longer
+exists, so `K_max(a_c) = K_IC` is solved by bounded bisection — deterministic,
+bracket-safe, exposed tolerance, and never evaluated at `W/2`.
 
-```
-C_SI = C_MPa / (10⁶)^m
-```
+![Finite-width geometry amplification](figures/fig2_finite_width_amplification.png)
 
-implemented as `paris_c_from_mpa_basis(c_mpa, m)`, with the inverse
-`paris_c_to_mpa_basis` and the constructor `paris_law_from_mpa_basis`.
+A consequence worth noting: the exact infinite-plate scaling `a_c ∝ K_IC²`
+**breaks** under finite width. Tripling `K_IC` from 20 to 60 MPa·√m would
+enlarge `a_c` ninefold in an infinite plate; here it enlarges it only 4.1-fold,
+because a larger `a_c` sits at a higher `Y(a_c)`.
 
-**The package never guesses the basis.** A `ParisLaw` value is always
-interpreted as SI; conversion from the MPa basis must be requested by name.
-Mixing the two bases is an error of `(10⁶)^m` — a factor of 10¹⁸ at `m = 3` —
-and is covered explicitly by test.
+## Variable-amplitude spectrum
 
-For the canonical curve, `C_MPa = 1.0e-11` and `m = 3.0` give
-`C_SI = 1.0e-11 / 10¹⁸ = 1.0e-29`.
+An ordered sequence of constant-amplitude blocks, repeated until fracture.
 
-## Paris-law data and provenance
+| Block | `σ_max` | `Δσ` | Count | `ΔK(a₀)` | State at `a₀` | `a_th` | `a_c` |
+| --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |
+| A low-amplitude | 70 MPa | 50 MPa | 10 000 | 2.803 | **ARRESTED** | 2.033 mm | 31.736 mm |
+| B manoeuvre | 110 MPa | 90 MPa | 1 000 | 5.046 | ACTIVE | 0.629 mm | 19.409 mm |
+| C severe gust | 150 MPa | 130 MPa | 100 | 7.288 | ACTIVE | 0.301 mm | **11.859 mm** |
 
-> **ILLUSTRATIVE PARIS-LAW INPUT — NOT DESIGN ALLOWABLE**
+11 100 cycles per spectrum. Each block carries its **own** threshold size (from
+its `Δσ`) and its **own** fracture boundary (from its `σ_max`) — never a
+spectrum-wide average.
 
-No measured fatigue-crack-growth dataset was obtained or verified for this
-milestone. The canonical curve is **illustrative**:
+![Threshold screening across the block spectrum](figures/fig3_block_threshold_activation.png)
 
-| Parameter | Value |
-| --- | --- |
-| `C` (MPa·√m basis) | 1.0 × 10⁻¹¹ m/cycle / (MPa·√m)^m |
-| `C` (SI basis) | 1.0 × 10⁻²⁹ m/cycle / (Pa·√m)^m |
-| `m` | 3.0 |
+### This is not Miner's rule
 
-These coefficients were selected **after** auditing the resulting physics over
-the intended crack-size range, not by tuning toward a preferred life:
+**No cumulative-damage sum `D = Σ nᵢ/Nᵢ` is formed anywhere**, and no life is
+derived from one. A damage sum would discard exactly the state that governs the
+answer: after every block the crack length has changed, and with it `Y(a)`,
+`ΔK(a)`, the threshold verdict and the fracture boundary. The sequential Paris
+process is integrated directly, carrying the crack length forward.
 
-- `ΔK` spans 5.60 → 17.72 MPa·√m over `a = 1 → 10 mm` at `Δσ = 100 MPa` —
-  comfortably above a typical threshold and well below a typical aluminium
-  toughness, so the Paris form is defensible over the whole range;
-- `da/dN` spans 1.76 × 10⁻⁹ → 5.57 × 10⁻⁸ m/cycle — a plausible mid-Paris band;
-- the resulting life is ≈ 7.8 × 10⁵ cycles — large enough to be meaningful,
-  small enough to inspect numerically.
+The canonical result shows why it matters: block A runs **100× more cycles**
+than block C but produces only **4.6×** the crack extension. Cycle counts do not
+rank blocks.
 
-**No specific aerospace alloy is claimed.** These values are not measured, not
-traceable to a qualification dataset, and must not be used as design allowables.
+Block advancement **inverts** the verified life integral —
+`N(a_start → a_end) = n_block`, solved by bounded bisection — rather than taking
+a crude `a + n·(da/dN)` step that would freeze the rate across a block.
 
-## Fracture toughness, critical crack size and residual strength
-
-`FractureToughness` is an immutable record storing `K_IC` on the **SI basis**
-(Pa·√m), with a mandatory non-empty provenance note. Handbook values are quoted
-in MPa·√m; the conversion `1 MPa·√m = 10⁶ Pa·√m` is the named helper
-`mpa_sqrt_m_to_pa_sqrt_m` (with its inverse), never inferred.
-
-**Critical crack size** — solving `K_IC = Y · σ_max · sqrt(π · a_c)`:
-
-```
-a_c = (1/π) · ( K_IC / (Y · σ_max) )²          (σ_max > 0)
-```
-
-Verified to scale exactly as `a_c ∝ K_IC²`, `a_c ∝ σ_max⁻²`, `a_c ∝ Y⁻²`.
-
-**Residual strength** — the same equation solved for stress instead of size:
-
-```
-σ_residual(a) = K_IC / ( Y · sqrt(π · a) )
-```
-
-Verified to scale as `a^(−1/2)`, `∝ K_IC`, `∝ 1/Y`, and — the key consistency
-check — `σ_residual(a_c) = σ_max` exactly, across a sweep of stresses,
-toughnesses and geometry factors.
-
-**Maximum-stress policy.** Mode-I fracture needs a tensile opening stress. If
-`σ_max ≤ 0` the cycle never opens the crack, no tensile mode-I fracture boundary
-exists in this model, and `critical_crack_length` returns `math.inf` with status
-`NO_TENSILE_BOUNDARY`. **`abs(σ_max)` is never taken** — compression must not
-manufacture a fictitious opening-fracture boundary.
-
-**Utilization and margin:**
-
-```
-utilization = K_max / K_IC
-MS_K        = K_IC / K_max − 1        (K_max > 0)
-```
-
-The screen **passes** when `K_max ≤ K_IC`; the boundary itself passes with zero
-margin. For a non-opening cycle the criterion is non-governing: utilization is
-`0.0` and the margin is `math.inf`. `MS_K` is a screening indicator only — it
-carries no load factor, scatter allowance, material variability, thickness or
-state-of-stress validity check, and is **not a certification margin of safety**.
-
-## Initial-flaw admissibility
-
-Before integrating, `a₀` is compared with `a_c`:
-
-| Case | Status | Reported life |
-| --- | --- | --- |
-| `a₀ < a_c` | `BELOW_CRITICAL` | finite, positive |
-| `a₀ = a_c` | `AT_CRITICAL` | `0.0` |
-| `a₀ > a_c` | `ABOVE_CRITICAL` | `0.0` |
-| `σ_max ≤ 0` | `NO_TENSILE_BOUNDARY` | `math.inf` |
-
-The integrator is never asked to run backwards. For `a₀ > a_c` the zero means
-"no crack-growth life remains — the flaw is already outside the LEFM fracture
-boundary at the first application of `σ_max`", **not** "it grew to critical in
-zero cycles". The structured status is the default reporting route; passing
-`strict=True` raises `InitialFlawBeyondCriticalError` instead.
-
-A zero stress range yields `math.inf` cycles even though a finite `a_c` exists:
-the crack simply never grows to it.
-
-## Life to the critical crack size
-
-`cycles_to_critical_crack` composes verified pieces rather than restating any
-physics. It computes `a_c`, classifies the initial flaw, and then calls the
-**unchanged Milestone 1** integrator with `a_final = a_c`. No separate
-"fracture-growth equation" exists or should exist: Milestone 2 only moves the
-upper integration limit from an imposed value to a physics-derived one. The
-analytical reference is likewise the Milestone 1 closed form evaluated at
-`a_final = a_c`, which is asserted directly by test.
-
-## Fracture-toughness data and provenance
-
-> **ILLUSTRATIVE FRACTURE-TOUGHNESS INPUT — NOT DESIGN ALLOWABLE**
-
-No measured fracture-toughness dataset was obtained or verified. The canonical
-value is **illustrative**: `K_IC = 30 MPa·√m` (`3.0 × 10⁷ Pa·√m`).
-
-It was selected **after** auditing the consequences across
-`K_IC = 20, 25, 30, 35, 40, 50, 60 MPa·√m` for the canonical cycle, not by
-tuning toward a preferred answer:
-
-| `K_IC` [MPa·√m] | `a_c` [mm] | Life 1 mm → `a_c` [cycles] | `MS_K(a₀)` |
-| --- | --- | --- | --- |
-| 20 | 8.842 | 753 837 | 1.974 |
-| 25 | 13.816 | 830 231 | 2.717 |
-| **30** | **19.894** | **881 161** | **3.460** |
-| 35 | 27.078 | 917 539 | 4.204 |
-| 40 | 35.368 | 944 823 | 4.947 |
-| 50 | 55.262 | 983 020 | 6.434 |
-| 60 | 79.577 | 1 008 485 | 7.921 |
-
-30 MPa·√m places `a_c` at 19.89 mm: comfortably above the 1 mm initial flaw,
-within a plausible inspectable crack-size range, and deliberately **not** equal
-to Milestone 1's arbitrary 10 mm target. It is treated as a single constant with
-no thickness or state-of-stress validity check.
-
-**No specific aerospace alloy is claimed.** The value is not measured, not
-traceable to a qualification dataset, and must not be used as a design
-allowable.
-
-## Finite-width fracture boundary and residual strength
-
-With `Y = Y(a)` the Milestone 2 closed form `a_c = (1/π)·(K_IC/(Y·σ_max))²` is
-**no longer valid** and is never used for a finite-width panel. The condition
-
-```
-K_max(a_c) = Y(a_c) · σ_max · sqrt(π · a_c) = K_IC
-```
-
-is implicit and is solved numerically by **bounded bisection** on
-`f(a) = K_max(a) − K_IC`. Bisection is chosen for transparency: deterministic,
-derivative-free, and incapable of leaving its bracket. `f` is monotonically
-increasing on the admissible interval, so the root is unique.
-
-- The bracket is **never widened silently**. A failed sign condition returns an
-  explicit `CriticalCrackStatus`, not a number.
-- The upper bracket sits at `(W/2)·(1 − 10⁻¹²)`, so **`a = W/2` is never
-  evaluated** — the point at which `Y` diverges.
-- The tolerance is an exposed parameter (default `10⁻¹² m`), not a hidden one.
-- Statuses distinguish a found root, a non-opening cycle (`σ_max ≤ 0`, giving no
-  tensile boundary and `a_c = ∞`), a lower bound already beyond critical, and no
-  root in the bracket.
-
-Residual strength inverts the same equation:
-
-```
-σ_residual(a) = K_IC / ( sqrt(π · a) · Y(a) )
-```
-
-Verified to fall monotonically with `a`, to lie **below** the infinite-plate
-value at the same crack length, to approach zero as `a → W/2`, and to return
-`σ_max` exactly at `a_c` — across a sweep of widths and stresses.
-
-**The identity `ΔK(a_c)/K_IC = Δσ/σ_max` survives `Y(a)` exactly**, because
-`Y(a_c)` multiplies both `ΔK` and `K_max` and cancels in the ratio. For the
-canonical cycle it is still exactly `5/6`, giving `ΔK(a_c) = 25 MPa·√m`. This is
-a strong cross-check that fracture uses `K_max` and growth uses `ΔK`.
-
-Ligament quantities (`2a`, `W − 2a`, `1 − 2a/W`) are reported alongside the
-fracture margin but are kept **strictly separate** from it: they are geometric
-diagnostics, never blended into the margin and never used as a pass/fail
-criterion. `passes` depends on `K_max ≤ K_IC` alone.
-
-## Geometry-aware log-grid integration
-
-The Milestone 1 uniform-`a` Simpson integrator is a verified baseline and is
-**not modified, replaced, or re-defaulted**. Milestone 3 adds a second
-integrator better suited to wide spans and to `Y(a)`.
-
-With `u = ln(a)`, `a = exp(u)`, `da = a du`:
-
-```
-N = ∫[a₀→a_f] da / (da/dN) = ∫[ln a₀ → ln a_f] a / (da/dN) du
-```
-
-A uniform grid in `u` is geometrically spaced in `a`, placing points where the
-integrand actually varies. At every abscissa the full chain is evaluated:
-
-```
-a → Y(a) → ΔK(a) → da/dN(a) → a/(da/dN)
-```
-
-so **`Y` is re-evaluated at every point and never factored out of the integral**.
-The same guarantees as Milestone 1 apply: fixed grid, even interval count
-required (odd rejected, not adjusted), no adaptive tolerance, deterministic,
-never leaves `[a₀, a_f]`, zero stress range returns `math.inf`, and no SciPy.
-
-### Measured integrator comparison
-
-Relative error against the constant-`Y` closed form, at equal interval count:
-
-| `n` | moderate span (`a_f/a₀ = 10`) | | wide span (`a_f/a₀ = 1000`) | |
-| --- | --- | --- | --- | --- |
-| | linear grid | log grid | linear grid | log grid |
-| 10 | 1.3 × 10⁻² | 9.7 × 10⁻⁷ | 1.6 × 10¹ | 7.8 × 10⁻⁵ |
-| 50 | 5.1 × 10⁻⁵ | 1.6 × 10⁻⁹ | 2.7 × 10⁰ | 1.3 × 10⁻⁷ |
-| 200 | 2.2 × 10⁻⁷ | 6.1 × 10⁻¹² | 4.0 × 10⁻¹ | 4.9 × 10⁻¹⁰ |
-| 1000 | 3.5 × 10⁻¹⁰ | 9.1 × 10⁻¹⁵ | 1.2 × 10⁻² | 7.9 × 10⁻¹³ |
-
-The log grid was **measured** to win at every interval count in this study, by
-roughly ten orders of magnitude at wide span. Both converge; the linear grid is
-correct, just inefficient when `a_f/a₀` is large. This is a measurement of these
-cases, not a claim that a log grid must always win.
-
-## Numerical convergence (finite width)
-
-Canonical finite-width case, log-grid Simpson, against an `n = 100 000`
-reference:
-
-| `n` | Life [cycles] | Relative vs finest |
-| --- | --- | --- |
-| 50 | 842 070.554322 | 1.79 × 10⁻⁹ |
-| 100 | 842 070.552907 | 1.13 × 10⁻¹⁰ |
-| 200 | 842 070.552818 | 7.05 × 10⁻¹² |
-| 500 | 842 070.552812 | 1.73 × 10⁻¹³ |
-| 1000 | 842 070.552812 | 4.70 × 10⁻¹⁵ |
-| 2000 | 842 070.552812 | 7.33 × 10⁻¹⁵ |
-| 4000 | 842 070.552812 | 8.43 × 10⁻¹⁵ |
-
-The **measured** error ratio is 15.90, 15.99 and 16.26 per interval doubling
-over `n = 50 → 400` — fourth order, as expected for Simpson, and confirmed to
-hold with a crack-size-dependent `Y`. Beyond `n ≈ 1000` the result sits at the
-floating-point floor, so no order can be claimed there. The case is already
-accurate to 2 × 10⁻⁹ at just 50 intervals.
-
-## Crack-growth threshold (Milestone 4)
-
-`CrackGrowthThreshold` stores `ΔK_th` on the SI basis (Pa·√m) with a mandatory
-provenance note. It reuses `mpa_sqrt_m_to_pa_sqrt_m` — the *same* conversion
-helper the fracture toughness uses, so there is one unit-conversion path in the
-package, not two.
-
-### Hard-cutoff policy
-
-```
-ΔK ≤ ΔK_th   →   da/dN = 0
-ΔK >  ΔK_th   →   da/dN = C · ΔK^m        (the unchanged Paris rate)
-```
-
-Two properties matter and are stated rather than buried:
-
-- **Equality belongs to the no-growth side.** A crack exactly at threshold does
-  not grow.
-- **The Paris rate is not modified above threshold.** This model does *not* use
-  `C·(ΔK − ΔK_th)^m` or `C·(ΔK^m − ΔK_th^m)`; those are different
-  near-threshold laws and are out of scope. Tests assert the result differs from
-  both.
-
-The original `crack_growth_rate` and `crack_growth_rate_for_geometry` are
-untouched and still apply **no** threshold at all — they remain the regression
-baseline, and a test confirms they still grow a crack far below threshold.
-
-### No crack closure
-
-`ΔK` is unchanged: `ΔK = Y(a)·(σ_max − σ_min)·sqrt(π·a)`. It is **not** modified
-by `K_min`, by `R`, by compression, or by any crack-opening level. This is a
-threshold model, not a closure model. A compressive `σ_min` therefore still
-inflates the algebraic `ΔK` and can make a crack look active that a
-closure-aware model would arrest — covered by an explicit test.
-
-### Threshold excess ratio, not a safety margin
-
-```
-threshold_ratio        = ΔK / ΔK_th
-threshold_excess_ratio = ΔK / ΔK_th − 1
-```
-
-Deliberately **not** called a margin of safety: the sign convention is the
-opposite of a strength margin. **Positive means the crack is being driven above
-threshold and therefore grows** — the adverse case, not the safe one.
-
-### Threshold crack size
-
-For constant `Y` there is a closed form:
-
-```
-a_th = (1/π) · ( ΔK_th / (Y · Δσ) )²
-```
-
-verified to scale exactly as `a_th ∝ ΔK_th²`, `a_th ∝ Δσ⁻²`, `a_th ∝ Y⁻²`. For a
-finite-width panel `Y = Y(a)` and the condition is implicit, so it is solved by
-the same bounded, deterministic, bracket-safe bisection used for the Milestone 3
-fracture boundary — never widening the bracket, never evaluating at `W/2`, with
-the tolerance exposed and explicit statuses for zero stress range, a lower bound
-already above threshold, and no root in the bracket.
-
-Cross-checked two ways: on a very wide panel the numerical root matches the exact
-constant-`Y` formula to 5 × 10⁻¹⁰ relative, and at `W = 100 mm` it differs from
-it by 1.3 × 10⁻⁴ relative (`Y > 1`, so the threshold is reached at a slightly
-*smaller* crack).
-
-### The arrest rule that matters most
-
-A crack whose `ΔK` is at or below `ΔK_th` has `da/dN = 0`. Because it does not
-grow **at all**, it can never reach `a_th` on its own. The remaining
-crack-growth life is therefore `+∞`.
-
-It is emphatically **not** "the life from `a_th` to `a_c`". The crack is never
-advanced to `a_th` first, and no such life is ever reported — doing so would
-silently teleport the crack past the arrest the model just predicted. A test
-asserts the reported life differs from that quantity.
-
-### Threshold vs fracture boundary
-
-| Ordering | Meaning |
-| --- | --- |
-| `a_th < a_c` | an active-growth interval `a_th < a < a_c` exists |
-| `a_th = a_c` | growth begins exactly at fracture |
-| `a_th > a_c` | no growth interval before fracture |
-
-For this monotonic geometry a growth interval requires roughly
-`ΔK_th < ΔK(a_c) = (Δσ/σ_max)·K_IC`. In the canonical case that is
-`4.00 < 25.00 MPa·√m`. When `a_th > a_c`, a crack below `a_c` stays arrested
-indefinitely — it cannot grow into the fracture boundary under the same constant
-amplitude, and the model does not invent growth to bridge the gap.
-
-`ΔK_th / K_IC` is reported as a **diagnostic only**, never as a criterion.
-
-## Variable-amplitude block spectrum (Milestone 5)
-
-A `LoadSpectrum` is an **ordered** tuple of `SpectrumBlock`, each holding a
-verified `StressCycle` and a positive integer cycle count. The order is
-preserved exactly as supplied: never sorted, never ranked by severity, never
-merged. Order matters because the crack length evolves as the spectrum is worked
-through — the same block applied at a larger crack sees a larger `Y(a)`, a
-larger `ΔK`, a different threshold verdict and a nearer fracture boundary.
-
-### Why Miner's rule is not used
-
-**No cumulative-damage sum `D = Σ nᵢ/Nᵢ` is formed anywhere in this package**, and
-no life is derived from one. A damage sum discards exactly the state that governs
-the answer: after every block the crack length has changed, and with it `Y(a)`,
-`ΔK(a)`, the threshold state and the block-specific fracture boundary. Milestone
-5 integrates the sequential Paris process directly instead.
-
-The canonical result shows why this matters concretely: the low-amplitude block
-runs **100× more cycles** than the severe block but produces only **4.6×** the
-crack extension. A cycle-weighted damage sum would badly misrank the blocks.
-
-### Block advancement
-
-The crude update `a_end = a_start + n·(da/dN at a_start)` freezes the growth rate
-across a block and is **not used**. Instead each block advance *inverts* the
-already-verified life integral: the end crack length solves
-
-```
-F(a_end) = N(a_start → a_end) − n_block = 0
-```
-
-where `N` is the unchanged Milestone 3 geometry-aware log-grid integration.
-`N` is strictly increasing in `a_end`, so the root is unique and a bounded
-bisection finds it deterministically, with no explicit time-step error.
-
-The bracket is seeded with a **rigorous** lower bound: because `da/dN` increases
-with `a`, an explicit Euler step under-predicts the growth, so
-`a_start + n·(da/dN at a_start)` can never overshoot `a_end`. The upper end is
-found by doubling that step. Every trial point stays inside `[a_start, a_c]` —
-the bracket is refined, never widened past the admissible interval, and the
-fallback is the full original bracket.
-
-Within an active block the integrator applies **no** threshold, and that is
-correct rather than convenient: `ΔK` increases monotonically with `a`, so a
-block active at `a_start` stays active for every larger crack in the block. The
-threshold cannot re-bind mid-block.
-
-### Per-block boundaries
-
-Every block has its **own** `σ_max` and therefore its **own** fracture boundary
-`a_c,i`, and its own `Δσ` and therefore its own threshold size `a_th,i`. Neither
-is computed once for the spectrum from an average stress — a cycle-weighted mean
-`σ_max` of the canonical spectrum is 74.3 MPa, which matches no block and gives a
-boundary more than twice the governing one.
-
-`minimum_block_critical_crack_length` is available as a **diagnostic envelope**
-only. The simulation never terminates because the crack passed it: fracture is
-checked in sequence against the block actually being applied. A crack may
-legitimately exceed a severe block's `a_c` while milder blocks are running.
-
-### Statuses and life accounting
-
-`SpectrumStatus` is explicit: `FRACTURE_REACHED`, `SPECTRUM_ARRESTED`,
-`MAX_REPEATS_REACHED`, `INITIAL_FLAW_ALREADY_CRITICAL`,
-`NO_TENSILE_FRACTURE_BOUNDARY`. No engineering outcome is returned as `None`.
-
-Life is reported in **actual stress cycles**; a spectrum repeat is a secondary
-diagnostic. When fracture happens inside a block the total is the cycles of all
-previously completed blocks plus the cycles completed inside the fracture block,
-never rounded up to a whole block or spectrum. The fracture cycle position stays
-a **float**, because the integrated Paris prediction is a continuum estimate.
-
-An arrested block still **consumes** its cycles — they occur, they simply produce
-no growth. A full pass that leaves the crack exactly where it started proves the
-spectrum is arrested, so `SPECTRUM_ARRESTED` is returned after one unchanged
-repeat rather than looping to the guard. `max_spectrum_repeats` is a numerical
-safety guard, not a physical life prediction.
-
-## Analytical reference
-
-For constant `Y` and constant `Δσ`, `da/dN = C·(Y·Δσ·√π)^m · a^(m/2)`, so
-
-```
-dN/da = 1 / [ C · (Y · Δσ · √π)^m · a^(m/2) ]
-```
-
-Integrating from `a₀` to `a_f`, with `p = 1 − m/2`:
-
-```
-m ≠ 2:   N = (a_f^p − a₀^p) / [ p · C · (Y · Δσ · √π)^m ]
-
-m = 2:   N = ln(a_f / a₀) / [ C · (Y · Δσ · √π)² ]
-```
-
-**Sign note for `m > 2`:** then `p < 0`, so `a_f^p < a₀^p` and the numerator is
-negative, while the denominator carries the same negative `p`. The quotient is
-positive, as a life must be. This is verified by an explicit test at
-`m = 2.5, 3.0, 3.5, 4.0, 5.0`.
-
-The `m = 2` branch is additionally checked against the `m → 2` limit of the
-power branch.
-
-## Numerical integration method
-
-```
-N = ∫[a₀ → a_f] da / (da/dN)
-```
-
-evaluated with a **fixed-grid composite Simpson rule**:
-
-- the analyst supplies the interval count (default 1000); there is no adaptive
-  refinement and no hidden tolerance;
-- Simpson's rule consumes sub-intervals in pairs, so an **even** interval count
-  is required — an odd count is **rejected**, not silently incremented;
-- the grid spans exactly `[a₀, a_f]` and never evaluates outside it;
-- the result is bit-for-bit reproducible across repeated calls.
-
-SciPy is not required: the integrand is smooth and one-dimensional, so a
-transparent hand-written Simpson rule over `math` is both sufficient and easier
-to audit. The package therefore has **no runtime dependencies**.
-
-The quadrature evaluates `da/dN` through the full modelling chain
-(`ΔK` → Paris law) rather than through the analytical solution's factored
-constant, so the numerical and analytical routines are genuinely independent and
-their agreement is a real cross-check.
-
-**Zero-range policy:** if `Δσ = 0` then `ΔK = 0` and `da/dN = 0`. The crack never
-reaches the target, and both the numerical and analytical routines return
-`math.inf` — an explicit, documented no-growth result. Nothing divides by zero.
-
-## Verification strategy
-
-Verification rests on four independent legs:
-
-1. **Hand calculations.** Literal expected values, derived by hand and written
-   into the tests, for `K`, `ΔK`, `R`, `da/dN`, the `C` unit conversion, and the
-   analytical life on both the `m ≠ 2` and `m = 2` branches.
-2. **Scaling laws.** `K ∝ σ`, `K ∝ √a`, `ΔK ∝ Δσ`, `ΔK ∝ Y`, `ΔK ∝ √a`,
-   `da/dN ∝ C`, `da/dN ∝ ΔK^m`, `N ∝ Δσ^−m`, `N ∝ Y^−m`, `N ∝ C^−1`.
-3. **Numerical vs analytical agreement.** Cross-checked to a relative tolerance
-   of 10⁻⁸ over a 360-case sweep spanning `m ∈ [1.0, 5.0]` (including below,
-   at, and above `m = 2`), three crack-size ranges, three stress ranges and four
-   geometry factors. Neither routine calls the other.
-4. **Numerical behaviour.** Convergence under interval refinement, the expected
-   O(h⁴) Simpson error order, bit-for-bit determinism, life additivity over a
-   split crack interval, and monotonic trends in every input.
-
-Input validation (non-finite values, non-positive `a`, `C`, `m`, `Y`, `K_IC`,
-reversed crack limits, odd interval counts, wrong argument types) is tested
-throughout.
-
-Milestone 2 adds a fifth leg:
-
-5. **Cross-criterion guards.** Explicit tests that fracture uses `K_max` and not
-   `ΔK`: two cycles sharing a `Δσ` but differing in `σ_max` must give identical
-   `ΔK` and different critical sizes; `K_max(a_c) = K_IC` exactly; and
-   `ΔK(a_c)/K_IC = Δσ/σ_max` across several cycles and geometry factors.
-   Milestone 1's canonical numbers, public API, conventions and sensitivity
-   results are additionally locked by a dedicated regression module.
-
-Milestone 3 adds a sixth leg:
-
-6. **Limit and convention checks.** The finite-width model must reduce to the
-   constant-`Y` model as `W → ∞` (verified for the geometry factor, `ΔK`, the
-   critical size and the life, at tightening tolerances); the half-crack
-   convention is locked so `a` is never confused with `2a`; the solver is shown
-   to be deterministic, bracket-safe and never to evaluate at `W/2`; and
-   freezing `Y` at `Y(a₀)` is shown to change the answer, proving `Y(a)` is
-   re-evaluated throughout the integration. A second regression module locks the
-   Milestone 2 fracture results.
-
-Milestone 4 adds a seventh leg:
-
-7. **Policy and separation checks.** The hard cutoff is asserted to be exactly
-   the unmodified Paris rate above threshold and exactly zero at or below it,
-   and to differ from both common alternative near-threshold laws; the original
-   no-threshold rate is shown still to grow a sub-threshold crack; the threshold
-   verdict is shown independent of `K_IC` and of `σ_max` at fixed `Δσ`; the
-   arrested case is shown *not* to report the life from `a_th` to `a_c`; and the
-   numerical threshold root is cross-checked against the exact constant-`Y`
-   formula. A third regression module locks the Milestone 3 finite-width results.
-
-Boundary tests near `ΔK ≈ ΔK_th` are built algebraically from the exact inverse
-rather than from decimal literals, and are asserted on **normalised ratios** —
-`pytest.approx` with a default absolute tolerance is unsafe on quantities whose
-difference approaches zero.
-
-Milestone 5 adds an eighth leg:
-
-8. **Sequential-integrity checks.** A one-block spectrum reproduces the verified
-   constant-amplitude life to 6 × 10⁻¹⁰; each block advance round-trips through
-   the life integral back to its requested cycle count; the crack length is
-   asserted continuous across block boundaries; total cycles are asserted equal
-   to the summed executed block cycles (never a damage sum); an arrested block
-   is shown to consume cycles while producing exactly zero growth; and a block
-   arrested at `a₀` is shown to activate at a larger crack. A fourth regression
-   module locks the Milestone 4 threshold results.
-
-### Numerical resolution of a spectrum answer
-
-Two settings matter and behave differently:
-
-- **Interval count** barely matters. A block advances the crack only slightly, so
-  the log-grid rule is already near-exact over that span: 50, 100, 200 and 400
-  intervals give an identical total cycle count and an identical final crack
-  length to nine decimal places in mm. The default is 50.
-- **Block-solve tolerance** sets the accuracy. At 10⁻⁶ m the canonical answer
-  shifts by a whole spectrum; from 10⁻⁸ m down it is stable.
-
-The deeper point is that a spectrum answer is **quantised to whole blocks**. One
-canonical spectrum is 11 100 cycles = 0.177 % of the life, and fracture is
-detected when a block *begins* or partway through it. Differences below one
-spectrum are therefore not resolvable in a cycles-to-fracture comparison — which
-is exactly why the sequence-order study is conducted on crack length after a
-fixed number of spectra instead.
-
-### A note on quadrature span
-
-The Milestone 1 fixed uniform Simpson grid resolves `1/(da/dN)` less well as the
-ratio `a_f/a₀` grows, because the integrand is steepest just above `a₀`. The
-convergence **order** is unaffected — it stays O(h⁴) — but a wide-span case needs
-more intervals to reach a given tolerance:
-
-| `a_c/a₀` | rel. error at 1000 | at 2000 | at 8000 | at 20000 |
-| --- | --- | --- | --- | --- |
-| 9.9 | 3.4 × 10⁻¹⁰ | 2.1 × 10⁻¹¹ | 8.7 × 10⁻¹⁴ | 3.1 × 10⁻¹⁵ |
-| 39.8 | 9.8 × 10⁻⁸ | 6.1 × 10⁻⁹ | 2.4 × 10⁻¹¹ | 6.2 × 10⁻¹³ |
-| 139.9 | 1.4 × 10⁻⁵ | 9.1 × 10⁻⁷ | 3.6 × 10⁻⁹ | 9.3 × 10⁻¹¹ |
-| 248.7 | 1.3 × 10⁻⁴ | 8.8 × 10⁻⁶ | 3.6 × 10⁻⁸ | 9.2 × 10⁻¹⁰ |
-
-The canonical case has `a_c/a₀ ≈ 20` and is fully converged at the 1000-interval
-default. Callers integrating to a distant fracture boundary should raise
-`intervals`; this behaviour is covered by test rather than left implicit.
-
-## Representative sanity result — Milestone 1 (imposed endpoint)
-
-Canonical idealized wing-skin case:
-
-| Input | Value |
-| --- | --- |
-| `Y` | 1.0 |
-| `σ_max` | 120 MPa |
-| `σ_min` | 20 MPa |
-| `Δσ` | 100 MPa |
-| `R` | 0.1667 |
-| `a₀` | 1.0 mm (assumed flaw) |
-| `a_f` | 10.0 mm (**imposed** target) |
-| Paris `C`, `m` | 1.0 × 10⁻²⁹ (SI), 3.0 |
+## Canonical integrated result
 
 | Result | Value |
-| --- | --- |
-| `ΔK(a₀)` | 5.6050 MPa·√m |
-| `ΔK(a_f)` | 17.7245 MPa·√m |
-| `da/dN(a₀)` | 1.7609 × 10⁻⁹ m/cycle |
-| `da/dN(a_f)` | 5.5683 × 10⁻⁸ m/cycle |
-| Numerical life (1000 intervals) | 776 634.4447 cycles |
-| Analytical life | 776 634.4445 cycles |
-| Absolute difference | 2.72 × 10⁻⁴ cycles |
-| Relative difference | 3.50 × 10⁻¹⁰ |
-
-Crack growth accelerates as the crack extends, because `ΔK ∝ √a` and
-`da/dN ∝ ΔK^m`: the rate at the target is ~32× the rate at the initial flaw.
-
-## Representative result — Milestone 2 (toughness-derived endpoint)
-
-Same geometry, cycle and Paris curve; `K_IC = 30 MPa·√m`; `a₀ = 1 mm`.
-
-| Fracture boundary | Value |
-| --- | --- |
-| Critical crack length `a_c` | 19.8944 mm |
-| Admissibility of `a₀` | below critical |
-| `K_max(a₀)` | 6.7260 MPa·√m |
-| `K_max(a_c)` | 30.0000 MPa·√m (`= K_IC` exactly) |
-| `ΔK(a_c)` | 25.0000 MPa·√m (`= 5/6 · K_IC`) |
-| `σ_residual(a₀)` | 535.24 MPa |
-| `σ_residual(a_c)` | 120.00 MPa (`= σ_max`, by construction) |
-| Initial utilization | 0.2242 |
-| Initial margin `MS_K` | 3.4603 (screening only) |
-
-| Life to fracture | Value |
-| --- | --- |
-| Numerical (1000 intervals) | 881 160.7850 cycles |
-| Analytical | 881 160.7798 cycles |
-| Relative difference | 5.98 × 10⁻⁹ |
-| `da/dN(a₀)` | 1.7609 × 10⁻⁹ m/cycle |
-| `da/dN(a_c)` | 1.5625 × 10⁻⁷ m/cycle |
-| Rate ratio | 88.7× |
-
-**Comparison with Milestone 1.** The imposed 10 mm target gave 776 634 cycles;
-the toughness-derived boundary at 19.894 mm gives 881 161 cycles — 104 526 more.
-The M1 target happened to be conservative here, but only by accident: it was an
-imposed number, and nothing guaranteed it fell below `a_c`.
-
-## Residual-strength screen
-
-`σ_max = 120 MPa`, `Y = 1.0`, `K_IC = 30 MPa·√m`.
-
-| `a` [mm] | `K_max` [MPa·√m] | `σ_residual` [MPa] | Utilization | `MS_K` | Result |
-| --- | --- | --- | --- | --- | --- |
-| 0.5 | 4.7560 | 756.9 | 0.1585 | 5.3078 | PASS |
-| 1.0 | 6.7260 | 535.2 | 0.2242 | 3.4603 | PASS |
-| 2.0 | 9.5120 | 378.5 | 0.3171 | 2.1539 | PASS |
-| 5.0 | 15.0398 | 239.4 | 0.5013 | 0.9947 | PASS |
-| 10.0 | 21.2694 | 169.3 | 0.7090 | 0.4105 | PASS |
-| 20.0 | 30.0795 | 119.7 | 1.0027 | −0.0026 | FAIL |
-
-The screen crosses from PASS to FAIL at `a_c = 19.894 mm`, as it must.
-
-## Fracture-toughness sensitivity
-
-See the audit table under [Fracture-toughness data and
-provenance](#fracture-toughness-data-and-provenance). Higher toughness gives a
-larger critical crack and a longer life, as expected — but with **strongly
-diminishing returns**: doubling `K_IC` from 25 to 50 MPa·√m enlarges `a_c`
-fourfold (13.8 → 55.3 mm) yet adds only ~18 % life, because most cycles are
-spent while the crack is small and `ΔK` is low. Toughness moves the endpoint
-only; it leaves `ΔK` and `da/dN` at any given crack length untouched.
-
-## Maximum-stress sensitivity at fixed `Δσ`
-
-`Δσ` held at 100 MPa, `σ_min = σ_max − 100 MPa`, so `R` varies and the Paris
-driving force does not. `a₀ = 1 mm`.
-
-| `σ_max` [MPa] | `σ_min` [MPa] | `R` | `da/dN(a₀)` [m/cycle] | `a_c` [mm] | Life [cycles] |
-| --- | --- | --- | --- | --- | --- |
-| 100 | 0 | 0.0000 | 1.7609 × 10⁻⁹ | 28.648 | 923 602 |
-| 120 | 20 | 0.1667 | 1.7609 × 10⁻⁹ | 19.894 | 881 161 |
-| 140 | 40 | 0.2857 | 1.7609 × 10⁻⁹ | 14.616 | 838 719 |
-| 160 | 60 | 0.3750 | 1.7609 × 10⁻⁹ | 11.191 | 796 278 |
-| 180 | 80 | 0.4444 | 1.7609 × 10⁻⁹ | 8.842 | 753 837 |
-
-This is the sharpest illustration of the `K_max` / `ΔK` split. `da/dN(a₀)` is
-**identical down the whole column** — `ΔK` depends only on `Δσ` — so the entire
-life reduction comes from `K_max` rising and pulling the fracture boundary
-inward as `a_c ∝ σ_max⁻²`. Nothing about the growth rate changed.
-
-## Stress-range sensitivity at fixed `σ_min`
-
-Deliberately distinct from the sweep above: here `σ_min` is held at 20 MPa, so
-`σ_max` moves with the range and **both** driving forces change at once.
-
-| `Δσ` [MPa] | `σ_max` [MPa] | `ΔK(a₀)` [MPa·√m] | `da/dN(a₀)` [m/cycle] | `a_c` [mm] | Life [cycles] |
-| --- | --- | --- | --- | --- | --- |
-| 50 | 70 | 2.8025 | 2.2011 × 10⁻¹⁰ | 58.465 | 7 898 116 |
-| 75 | 95 | 4.2037 | 7.4286 × 10⁻¹⁰ | 31.743 | 2 214 430 |
-| 100 | 120 | 5.6050 | 1.7609 × 10⁻⁹ | 19.894 | 881 161 |
-| 125 | 145 | 7.0062 | 3.4392 × 10⁻⁹ | 13.626 | 423 992 |
-| 150 | 170 | 8.4075 | 5.9429 × 10⁻⁹ | 9.913 | 229 647 |
-
-The life falls far faster here than in either single-effect sweep, because a
-faster-growing crack is also chasing a nearer boundary.
-
-## Geometry-factor sensitivity
-
-`Y` hurts twice: the growth rate rises as `Y^m` while `a_c` falls as `Y⁻²`.
-
-| `Y` | `da/dN(a₀)` [m/cycle] | `a_c` [mm] | Life [cycles] |
-| --- | --- | --- | --- |
-| 0.8 | 9.0156 × 10⁻¹⁰ | 31.085 | 1 820 489 |
-| 0.9 | 1.2837 × 10⁻⁹ | 24.561 | 1 243 657 |
-| 1.0 | 1.7609 × 10⁻⁹ | 19.894 | 881 161 |
-| 1.1 | 2.3437 × 10⁻⁹ | 16.442 | 642 897 |
-| 1.2 | 3.0428 × 10⁻⁹ | 13.816 | 480 458 |
-
-A 50 % increase in `Y` (0.8 → 1.2) costs ~74 % of the life — more than either
-effect alone would produce, which is verified by test.
-
-## Initial-flaw sensitivity to fracture
-
-`a_c` fixed at 19.894 mm.
-
-| `a₀` [mm] | `a₀/a_c` | Utilization | Life to `a_c` [cycles] |
-| --- | --- | --- | --- |
-| 0.25 | 0.0126 | 0.1121 | 2 016 969 |
-| 0.50 | 0.0251 | 0.1585 | 1 351 628 |
-| 1.00 | 0.0503 | 0.2242 | 881 161 |
-| 2.00 | 0.1005 | 0.3171 | 548 490 |
-| 4.00 | 0.2011 | 0.4484 | 313 256 |
-
-A 16× larger initial flaw costs ~84 % of the life. The assumed initial flaw size
-dominates the answer far more strongly than the toughness does — a 3× range in
-`K_IC` moves the life by ~34 %, while a 16× range in `a₀` moves it by ~84 %.
-Utilization follows `sqrt(a₀/a_c)` exactly for constant `Y`.
-
-## Representative result — Milestone 3 (finite width)
-
-Same cycle, Paris curve and toughness; centre-cracked panel of `W = 100 mm`,
-`a₀ = 1 mm` (half crack length, so total crack `2a₀ = 2 mm`).
-
-The width was chosen after auditing `W = 40, 50, 75, 100, 150, 200, 500 mm`.
-At 100 mm the initial flaw is safely small (`a₀/W = 0.01`, `Y(a₀) = 1.00025`),
-the critical crack sits at 17.09 mm with a total crack length of only 34 % of
-the panel width, and the finite-width effect is noticeable but not pathological.
-Narrower panels give a more dramatic penalty but push the total crack past half
-the width, where the unmodelled net-section behaviour would realistically govern.
-
-| Fracture boundary | Value |
-| --- | --- |
-| Solver | bounded bisection, 36 iterations, tol 10⁻¹² m |
-| Critical half crack `a_c` | 17.0940 mm |
-| Total crack `2a_c` | 34.1879 mm |
-| `Y(a₀)` | 1.000247 |
-| `Y(a_c)` | 1.078807 |
-| `K_max(a_c)` | 30.0000 MPa·√m (`= K_IC`) |
-| `ΔK(a_c)` | 25.0000 MPa·√m (`= 5/6 · K_IC`) |
-| Residual ligament | 65.8121 mm |
-| Ligament fraction | 0.658121 (diagnostic only) |
-| `σ_residual(a_c)` | 120.00 MPa (`= σ_max`) |
-
-| Life | Value |
-| --- | --- |
-| Finite-width life (log grid, 1000 intervals) | 842 070.5528 cycles |
-| Infinite-plate life (Milestone 2) | 881 160.7798 cycles |
-| **Life reduction** | **4.44 %** |
-| **Critical-size reduction** | **14.08 %** |
-| `da/dN(a₀)` | 1.7622 × 10⁻⁹ m/cycle |
-| `da/dN(a_c)` | 1.5625 × 10⁻⁷ m/cycle |
-
-The critical size moves three times as much as the life does. Most of the life
-is spent while the crack is small and `Y` is still close to 1, so finite width
-costs far less life than its effect on the fracture boundary suggests.
-
-**Frozen-`Y` diagnostic.** Holding `Y` at `Y(a₀)` for the whole integration
-gives 860 455 cycles — a **2.18 % overestimate**, growing for narrower panels.
-Freezing `Y` ignores exactly the amplification that builds up as the crack
-grows. It is reported only to quantify that error and is never used as a result.
-
-## Width sensitivity
-
-`a₀ = 1 mm` and the cycle fixed.
-
-| `W` [mm] | `Y(a₀)` | `a_c` [mm] | `2a_c/W` | Ligament fraction | Life [cycles] |
-| --- | --- | --- | --- | --- | --- |
-| 40 | 1.001545 | 11.8644 | 0.5932 | 0.4068 | 741 596 |
-| 50 | 1.000988 | 13.3222 | 0.5329 | 0.4671 | 774 554 |
-| 75 | 1.000439 | 15.7299 | 0.4195 | 0.5805 | 820 029 |
-| **100** | **1.000247** | **17.0940** | **0.3419** | **0.6581** | **842 071** |
-| 150 | 1.000110 | 18.4305 | 0.2457 | 0.7543 | 861 641 |
-| 200 | 1.000062 | 19.0136 | 0.1901 | 0.8099 | 869 637 |
-| 500 | 1.000010 | 19.7415 | 0.0790 | 0.9210 | 879 206 |
-| ∞ (M2) | 1.000000 | 19.8944 | — | — | 881 161 |
-
-Monotonic and convergent, as verified by test: wider panels give a lower `Y`, a
-larger critical crack, a longer life and a larger ligament fraction, approaching
-the infinite-plate reference from below.
-
-## Initial-crack sensitivity (finite width)
-
-`W = 100 mm`, cycle fixed.
-
-| `a₀` [mm] | `a₀/W` | `Y(a₀)` | Utilization | Life [cycles] |
-| --- | --- | --- | --- | --- |
-| 0.25 | 0.0025 | 1.000015 | 0.1121 | 1 977 634 |
-| 0.50 | 0.0050 | 1.000062 | 0.1585 | 1 312 357 |
-| 1.00 | 0.0100 | 1.000247 | 0.2243 | 842 071 |
-| 2.00 | 0.0200 | 1.000988 | 0.3174 | 509 912 |
-| 4.00 | 0.0400 | 1.003966 | 0.4502 | 276 125 |
-| 8.00 | 0.0800 | 1.016089 | 0.6443 | 113 856 |
-
-A 32× larger initial flaw costs 94 % of the life. The assumed initial flaw size
-remains the single most influential input in the whole model.
-
-## Maximum-stress sensitivity at fixed `Δσ` (finite width)
-
-`Δσ` held at 100 MPa, so `R` varies and the Paris driving force does not.
-
-| `σ_max` [MPa] | `R` | `ΔK(a₀)` [MPa·√m] | `da/dN(a₀)` [m/cycle] | `a_c` [mm] | Life [cycles] |
-| --- | --- | --- | --- | --- | --- |
-| 100 | 0.0000 | 5.6064 | 1.7622 × 10⁻⁹ | 22.0467 | 866 399 |
-| 120 | 0.1667 | 5.6064 | 1.7622 × 10⁻⁹ | 17.0940 | 842 071 |
-| 140 | 0.2857 | 5.6064 | 1.7622 × 10⁻⁹ | 13.3496 | 811 768 |
-| 160 | 0.3750 | 5.6064 | 1.7622 × 10⁻⁹ | 10.5783 | 777 323 |
-| 180 | 0.4444 | 5.6064 | 1.7622 × 10⁻⁹ | 8.5266 | 740 185 |
-
-`ΔK(a₀)` and `da/dN(a₀)` are identical down the column — the `K_max`/`ΔK`
-separation demonstrated in Milestone 2 survives a crack-size-dependent `Y`. The
-life falls purely because the fracture boundary moves inward.
-
-## Stress-range sensitivity at fixed `σ_min` (finite width)
-
-Deliberately distinct: `σ_min` held at 20 MPa, so **both** driving forces move.
-
-| `σ_max` [MPa] | `Δσ` [MPa] | `ΔK(a₀)` [MPa·√m] | `a_c` [mm] | Life [cycles] |
-| --- | --- | --- | --- | --- |
-| 80 | 60 | 3.3638 | 28.2552 | 4 088 856 |
-| 100 | 80 | 4.4851 | 22.0467 | 1 692 185 |
-| 120 | 100 | 5.6064 | 17.0940 | 842 071 |
-| 140 | 120 | 6.7276 | 13.3496 | 469 773 |
-| 160 | 140 | 7.8489 | 10.5783 | 283 281 |
-| 180 | 160 | 8.9702 | 8.5266 | 180 709 |
-
-## Toughness sensitivity (finite width) — the broken `K_IC²` law
-
-| `K_IC` [MPa·√m] | `a_c` [mm] | `Y(a_c)` | Ligament fraction | Life [cycles] | `a_c/K_IC²` (normalised) |
-| --- | --- | --- | --- | --- | --- |
-| 20 | 8.5266 | 1.0183 | 0.8295 | 740 185 | 1.0000 |
-| 25 | 12.7260 | 1.0419 | 0.7455 | 805 157 | 0.9552 |
-| 30 | 17.0940 | 1.0788 | 0.6581 | 842 071 | 0.8910 |
-| 35 | 21.2599 | 1.1286 | 0.5748 | 863 358 | 0.8142 |
-| 40 | 25.0049 | 1.1893 | 0.4999 | 875 792 | 0.7331 |
-| 50 | 31.0254 | 1.3346 | 0.3795 | 887 704 | 0.5822 |
-| 60 | 35.3486 | 1.5004 | 0.2930 | 892 339 | 0.4606 |
-
-**This is the key Milestone 3 finding.** For the infinite plate, `a_c ∝ K_IC²`
-holds *exactly* — the last column would read 1.0000 throughout, and a test
-asserts precisely that for the Milestone 2 model. For a finite-width panel it
-does **not**: the column falls to 0.46, because a larger `a_c` sits at a higher
-`Y(a_c)`, which eats into the toughness benefit. Tripling `K_IC` from 20 to
-60 MPa·√m would enlarge `a_c` ninefold in an infinite plate; here it enlarges it
-only 4.1-fold. Extra toughness buys progressively less crack length, and the
-ligament fraction falls to 0.29, where the unmodelled net-section behaviour
-would realistically start to govern.
-
-## Geometry amplification at `W = 100 mm`
-
-| `a` [mm] | `a/W` | `2a` [mm] | Ligament fraction | `Y(a)` | `K_max` [MPa·√m] | `ΔK` [MPa·√m] |
-| --- | --- | --- | --- | --- | --- | --- |
-| 0.5 | 0.005 | 1.0 | 0.990 | 1.0001 | 4.7563 | 3.9636 |
-| 1 | 0.010 | 2.0 | 0.980 | 1.0002 | 6.7276 | 5.6064 |
-| 2 | 0.020 | 4.0 | 0.960 | 1.0010 | 9.5214 | 7.9345 |
-| 5 | 0.050 | 10.0 | 0.900 | 1.0062 | 15.1332 | 12.6110 |
-| 10 | 0.100 | 20.0 | 0.800 | 1.0254 | 21.8099 | 18.1749 |
-| 15 | 0.150 | 30.0 | 0.700 | 1.0594 | 27.5970 | 22.9975 |
-| 20 | 0.200 | 40.0 | 0.600 | 1.1118 | 33.4420 | 27.8683 |
-| 30 | 0.300 | 60.0 | 0.400 | 1.3043 | 48.0426 | 40.0355 |
-| 40 | 0.400 | 80.0 | 0.200 | 1.7989 | 76.5085 | 63.7571 |
-
-`Y` is within 0.3 % of unity below `a/W ≈ 0.03` and climbs steeply past
-`a/W ≈ 0.3`.
-
-## Representative result — Milestone 4 (threshold screen)
-
-Same panel, cycle, Paris curve and toughness; `ΔK_th = 4 MPa·√m`.
-
-The threshold was chosen after auditing 2, 3, 4, 5, 6, 8 and 10 MPa·√m against
-`ΔK(a₀) = 5.6064 MPa·√m`: values up to 5 leave the initial crack active, 6 and
-above arrest it. 4 MPa·√m is a round value in the range usually quoted for
-aluminium alloys at moderate stress ratio and places `a_th` at 0.51 mm. It was
-**not** chosen to guarantee active growth — 5 MPa·√m would also have been active.
-
-| Initial crack state | Value |
-| --- | --- |
-| `Y(a₀)` | 1.000247 |
-| `K_max(a₀)` | 6.7276 MPa·√m |
-| `ΔK(a₀)` | 5.6064 MPa·√m |
-| `ΔK(a₀)/ΔK_th` | 1.401594 |
-| Threshold excess ratio | +0.401594 (positive ⇒ **growing**) |
-| **State** | **`ACTIVE_GROWTH`** |
-
-| Boundaries | Value |
-| --- | --- |
-| Threshold crack `a_th` | 0.5092 mm |
-| Fracture crack `a_c` | 17.0940 mm |
-| `a_th / a_c` | 0.029790 |
-| Ordering | `ACTIVE_INTERVAL_EXISTS` |
-| `ΔK(a_th)` | 4.0000 MPa·√m (`= ΔK_th`) |
-| `ΔK(a_c)` | 25.0000 MPa·√m |
-| `ΔK_th / K_IC` | 0.1333 (diagnostic only) |
-| Ligament fraction at `a_th` / `a_c` | 0.989815 / 0.658121 (diagnostic only) |
-
-| Life | Value |
-| --- | --- |
-| Threshold-aware | 842 070.5528 cycles |
-| Milestone 3, no threshold | 842 070.5528 cycles |
-| Difference | **0.000000 — bit-for-bit identical** |
-
-### The key negative result
-
-Because the hard cutoff does not modify the Paris rate above threshold, an
-already-growing crack has **exactly** the Milestone 3 life. The threshold buys
-no extra cycles; it only changes the verdict. And when the initial crack is at
-or below threshold, the life is **infinite, not merely longer**.
-
-So the model is **discontinuous**: the answer is either the full no-threshold
-life or infinity, with nothing in between. That is a property of the chosen
-simplified cutoff, not of the material, and it is reported rather than smoothed.
-
-## Threshold sensitivity
-
-`a₀ = 1 mm`, `W = 100 mm`, canonical cycle. "Disabled" means the screen is off,
-which reproduces Milestone 3 exactly.
-
-| `ΔK_th` [MPa·√m] | `ΔK(a₀)/ΔK_th` | `a_th` [mm] | State | Life [cycles] |
-| --- | --- | --- | --- | --- |
-| disabled | — | — | `ACTIVE_GROWTH` | 842 070.6 |
-| 2.0 | 2.803187 | 0.1273 | `ACTIVE_GROWTH` | 842 070.6 |
-| 3.0 | 1.868792 | 0.2865 | `ACTIVE_GROWTH` | 842 070.6 |
-| **4.0** | **1.401594** | **0.5092** | **`ACTIVE_GROWTH`** | **842 070.6** |
-| 5.0 | 1.121275 | 0.7955 | `ACTIVE_GROWTH` | 842 070.6 |
-| 5.5 | 1.019341 | 0.9624 | `ACTIVE_GROWTH` | 842 070.6 |
-| 5.6 | 1.001138 | 0.9977 | `ACTIVE_GROWTH` | 842 070.6 |
-| 5.7 | 0.983574 | 1.0336 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
-| 6.0 | 0.934396 | 1.1452 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
-| 8.0 | 0.700797 | 2.0330 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
-| 10.0 | 0.560637 | 3.1674 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
-
-The life column takes exactly **two** values across the whole sweep — a step,
-not a trend. The crossing sits between 5.6 and 5.7, i.e. at
-`ΔK(a₀) = 5.6064 MPa·√m`, as it must.
-
-## Initial-crack sensitivity with threshold
-
-`ΔK_th = 4 MPa·√m`, `W = 100 mm`, canonical cycle.
-
-| `a₀` [mm] | `ΔK(a₀)` [MPa·√m] | Ratio | State | Life [cycles] |
-| --- | --- | --- | --- | --- |
-| 0.10 | 1.7725 | 0.4431 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
-| 0.25 | 2.8025 | 0.7006 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
-| 0.50 | 3.9636 | 0.9909 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
-| 1.00 | 5.6064 | 1.4016 | `ACTIVE_GROWTH` | 842 070.6 |
-| 2.00 | 7.9345 | 1.9836 | `ACTIVE_GROWTH` | 509 912.1 |
-| 4.00 | 11.2544 | 2.8136 | `ACTIVE_GROWTH` | 276 124.8 |
-| 8.00 | 16.1084 | 4.0271 | `ACTIVE_GROWTH` | 113 856.3 |
-
-A **genuine transition**: flaws at or below 0.5 mm arrest, 1 mm and above grow.
-This was reported, not engineered — the 0.5 mm row sits at ratio 0.9909, just
-under the cutoff, purely as a consequence of the audited inputs.
-
-## Stress-range sensitivity with threshold
-
-`σ_min = 20 MPa` fixed, so both the driving range and the fracture boundary move.
-
-| `σ_max` [MPa] | `Δσ` [MPa] | `ΔK(a₀)` [MPa·√m] | Ratio | `a_c` [mm] | State | Life [cycles] |
-| --- | --- | --- | --- | --- | --- | --- |
-| 40 | 20 | 1.1213 | 0.2803 | 42.3915 | `ARRESTED` | ∞ |
-| 60 | 40 | 2.2425 | 0.5606 | 35.3486 | `ARRESTED` | ∞ |
-| 80 | 60 | 3.3638 | 0.8410 | 28.2552 | `ARRESTED` | ∞ |
-| 100 | 80 | 4.4851 | 1.1213 | 22.0467 | `ACTIVE` | 1 692 185.2 |
-| 120 | 100 | 5.6064 | 1.4016 | 17.0940 | `ACTIVE` | 842 070.6 |
-| 140 | 120 | 6.7276 | 1.6819 | 13.3496 | `ACTIVE` | 469 773.3 |
-| 160 | 140 | 7.8489 | 1.9622 | 10.5783 | `ACTIVE` | 283 281.0 |
-| 180 | 160 | 8.9702 | 2.2425 | 8.5266 | `ACTIVE` | 180 709.2 |
-
-A second genuine transition, between `σ_max` = 80 and 100 MPa.
-
-## Fixed-`Δσ` distinction under a threshold
-
-`Δσ` held at 100 MPa, `σ_min = σ_max − 100 MPa`.
-
-| `σ_max` [MPa] | `ΔK(a₀)` [MPa·√m] | Ratio | `a_th` [mm] | `a_c` [mm] | Life [cycles] |
-| --- | --- | --- | --- | --- | --- |
-| 100 | 5.606375 | 1.401594 | 0.5092 | 22.0467 | 866 398.8 |
-| 120 | 5.606375 | 1.401594 | 0.5092 | 17.0940 | 842 070.6 |
-| 140 | 5.606375 | 1.401594 | 0.5092 | 13.3496 | 811 768.2 |
-| 160 | 5.606375 | 1.401594 | 0.5092 | 10.5783 | 777 323.0 |
-| 180 | 5.606375 | 1.401594 | 0.5092 | 8.5266 | 740 185.0 |
-
-`ΔK(a₀)`, the ratio and `a_th` are **identical down the column**: the threshold
-sees only `Δσ`. The life changes purely because `K_max` moves the fracture
-endpoint. This is the Milestone 2/3 `K_max`/`ΔK` separation, now extended to
-show that the *threshold criterion* is likewise blind to `σ_max`.
-
-The same separation holds for toughness: `K_IC` does not enter `ΔK`, so across
-`K_IC` = 20–60 MPa·√m the threshold verdict and `a_th` are unchanged to 12
-significant figures while `a_c` moves from 8.53 to 35.35 mm and the life from
-740 185 to 892 339 cycles.
-
-Width acts only through `Y(a₀)`: from `W` = 40 to 500 mm the ratio moves just
-0.15 % (1.403413 → 1.401262), so no width in that sweep crosses the threshold,
-though the life still moves strongly through `a_c`.
-
-## Representative result — Milestone 5 (variable amplitude)
-
-Canonical illustrative spectrum: a 100 : 10 : 1 exceedance shape, ordered low →
-manoeuvre → severe, applied to the same panel, Paris curve, toughness and
-threshold. 11,100 cycles per spectrum.
-
-> **ILLUSTRATIVE VARIABLE-AMPLITUDE STRESS SPECTRUM — NOT FLIGHT LOAD DATA.**
-> Invented for this study; not measured, not a certification or gust spectrum,
-> not traceable to any aircraft, manufacturer or regulator.
-
-| Block | `σ_max` [MPa] | `Δσ` [MPa] | Count | `ΔK(a₀)` [MPa·√m] | State at `a₀` | `a_th` [mm] | `a_c` [mm] |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| A low-amplitude | 70 | 50 | 10 000 | 2.8032 | **ARRESTED** | 2.0330 | 31.7358 |
-| B manoeuvre | 110 | 90 | 1 000 | 5.0457 | ACTIVE | 0.6286 | 19.4092 |
-| C severe gust | 150 | 130 | 100 | 7.2883 | ACTIVE | 0.3013 | **11.8589** |
-
-The severe block has the **smallest** fracture boundary and governs fracture;
-the low block starts below threshold and contributes nothing at first.
-
-| Life result | Value |
-| --- | --- |
+| --- | ---: |
 | Status | `FRACTURE_REACHED` |
 | Full spectra completed | 565 |
 | Partial spectrum | 11 000 cycles |
 | **Total cycles** | **6 282 500** |
-| Final crack length | 12.0031 mm |
-| Total crack extension | 11.0031 mm |
-| Fracture block | C severe gust (index 2, repeat 566) |
-| Cycle within that block | **0.0000** of 100 |
-| `K_max` at fracture | 30.2087 MPa·√m |
-| Utilization | 1.006957 |
+| Final crack half-length | 12.003 mm |
+| Fracture block | C severe gust (repeat 566) |
+| Cycle within that block | **0.000** of 100 |
+| `K_max`/`K_IC` at detection | 1.00696 |
 
-**Fracture occurs at cycle 0 of the severe block.** The crack was pushed past
-the severe block's 11.86 mm boundary by the two milder blocks earlier in the
-*same* pass — neither of which fractures at that size, because their own
-boundaries are 19.4 and 31.7 mm. The severe block then fractures on its very
-first cycle. This is precisely why fracture must be checked per block, in
-sequence, rather than against a single envelope.
+**Fracture occurs as the severe block begins.** The two milder blocks pushed the
+crack past C's 11.86 mm boundary earlier in the *same* pass without fracturing —
+their own boundaries are 19.4 and 31.7 mm — so C fractures on its first cycle.
+This is precisely why fracture must be checked per block, in sequence, rather
+than against a single envelope.
 
-## Growth contribution by block
+![Variable-amplitude crack history](figures/fig4_spectrum_crack_history.png)
 
-Crack-extension contribution — **not** Miner damage.
+### Crack-extension contribution by block
 
-| Block | Executions | Cycles | Extension [mm] | Share | First active | Max `ΔK` [MPa·√m] | Triggered fracture |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| A low-amplitude | 566 | 5 660 000 | 5.65492 | **51.4 %** | repeat 359 | 10.041 | no |
-| B manoeuvre | 566 | 566 000 | 4.12036 | 37.5 % | repeat 1 | 18.125 | no |
-| C severe gust | 566 | 56 500 | 1.22783 | 11.2 % | repeat 1 | 26.181 | **yes** |
+Not a damage fraction.
 
-The low block starts **arrested**, activates only at repeat 359 once the crack
-reaches its 2.03 mm threshold size — and then becomes the **largest single
-contributor** to crack extension. A block cannot be classified as irrelevant from
-its state at `a₀`; the threshold verdict is recomputed on every execution.
+| Block | Cycles | Extension | Share | First active | Triggered fracture |
+| --- | ---: | ---: | ---: | --- | --- |
+| A low-amplitude | 5 660 000 | 5.655 mm | **51.4 %** | repeat 359 | no |
+| B manoeuvre | 566 000 | 4.120 mm | 37.5 % | repeat 1 | no |
+| C severe gust | 56 500 | 1.228 mm | 11.2 % | repeat 1 | **yes** |
 
-## Threshold on/off, and the constant-amplitude regression
+A block cannot be dismissed from its state at `a₀`: the threshold verdict is
+recomputed on every execution, and the block that started arrested ends up
+dominant.
 
-| Case | Cycles | Spectra |
-| --- | --- | --- |
-| Threshold enabled | 6 282 500 | 565 |
-| Threshold disabled (`threshold=None`) | 4 018 100 | 361 |
+### Sequence order
 
-Disabling the threshold **shortens** the predicted life by 36 %, because the low
-block then grows the crack from the very first pass.
+Compared by crack length after a fixed number of spectra, which removes the
+block-granularity quantisation a cycles-to-fracture comparison carries.
 
-A spectrum of one repeated block must reproduce the verified constant-amplitude
-answer, and does — the strongest Milestone 5 regression:
+| Order | `a` @200 repeats | `a` @400 repeats | Cycles to fracture |
+| --- | ---: | ---: | ---: |
+| A→B→C | 1.441960007 mm | 2.610895717 mm | 6 282 500 |
+| C→B→A | 1.441960014 mm | 2.620253809 mm | 6 271 500 |
+| B→C→A | 1.441960007 mm | 2.620253790 mm | 6 272 500 |
 
-| | Cycles |
-| --- | --- |
-| Single-block spectrum (10 000-cycle block) | 842 070.5523 |
-| Milestone 3/4 direct | 842 070.5528 |
-| Relative difference | 6.2 × 10⁻¹⁰ |
+Before the low block activates the orderings agree to **1 part in 10⁸** — the
+model is effectively order-independent, as pure Paris growth over always-active
+blocks should be. After activation a real but small **0.36 %** effect appears:
+running the low block first catches it at the smallest crack of each pass, where
+it is most often still arrested.
 
-## Sequence-order study
+Measured on cycles to fracture instead, the spread (0.175–0.177 %) is one
+spectrum — the quantisation floor. **No numerical significance is claimed below
+that floor.**
 
-Same blocks, same counts, different order. Compared by **crack length after a
-fixed number of spectra**, which removes the block-granularity quantisation that
-a cycles-to-fracture comparison would carry.
+## Robustness
 
-| Order | Crack after 200 spectra | Crack after 400 spectra |
-| --- | --- | --- |
-| A→B→C | 1.4419600 mm | 2.610895717 mm |
-| C→B→A | +5 × 10⁻⁹ | +0.358 % |
-| B→A→C | +0 | +0.358 % |
-| C→A→B | +5 × 10⁻⁹ | +0.358 % |
+| `ΔK_th` [MPa·√m] | Active at `a₀` | Cycles | Status |
+| ---: | :---: | ---: | --- |
+| disabled / 2.0 | 3/3 | 4 018 100 | `FRACTURE_REACHED` |
+| 4.0 | 2/3 | 6 271 400 | `FRACTURE_REACHED` |
+| 6.0 | 1/3 | 15 007 100 | `FRACTURE_REACHED` |
+| 8.0 | 0/3 | ∞ | `SPECTRUM_ARRESTED` |
 
-**Before** the low block activates (~repeat 359) the orderings agree to 1 part
-in 10⁸ — the model is effectively order-independent, as pure Paris growth over
-always-active blocks should be. **After** activation a real but small effect
-appears: running the low block **first** catches it at the smallest crack of each
-pass, where it is most often still arrested, so it contributes less growth.
+| `a₀` [mm] | Active at `a₀` | Cycles | Status |
+| ---: | :---: | ---: | --- |
+| 0.25 | 0/3 | ∞ | `SPECTRUM_ARRESTED` |
+| 0.50 | 1/3 | 18 514 700 | `FRACTURE_REACHED` |
+| 1.00 | 2/3 | 6 271 400 | `FRACTURE_REACHED` |
+| 4.00 | 3/3 | 1 165 400 | `FRACTURE_REACHED` |
 
-The sequence effect here arises **only** from evolving crack size, threshold
-activation and per-block fracture checks. It does **not** include overload
-retardation, residual stress, crack-closure memory or plasticity history — the
-only state carried between blocks is the crack length.
+| Severe-block count | Cycles | Fracture block |
+| ---: | ---: | --- |
+| 0 (removed) | 7 985 415 | **B manoeuvre** |
+| 100 | 6 271 400 | C severe gust |
+| 200 | 5 364 600 | C severe gust |
 
-Measured on **cycles to fracture** instead, the orderings differ by 0.175–0.177 %
-— which is one spectrum (11 100 cycles = 0.1767 % of life). The answer is
-quantised to whole blocks, so differences below one spectrum are not resolvable
-in that metric.
+Removing the severe block hands fracture governance to the manoeuvre block, whose
+boundary is 19.4 mm rather than 11.9 mm.
 
-## Spectrum sensitivity
+Also verified: disabling the threshold **shortens** predicted life by 36 %;
+stress scaling 0.75 → 1.25 shortens life monotonically (24.3 M → 2.36 M cycles);
+toughness 20 → 50 MPa·√m lengthens it with diminishing returns (5.55 M → 6.68 M);
+width 50 → 500 mm lengthens it and converges (6.01 M → 6.39 M). Threshold
+activity is independent of `K_IC`, since `K_IC` does not enter `ΔK`.
 
-**Severe-block count** (stress levels fixed):
+An "arrested" result means only that the modelled `ΔK` never exceeds the assumed
+constant threshold under this exact loading. It is **not** infinite structural
+life.
 
-| Count | Spectra | Cycles | Fracture block |
-| --- | --- | --- | --- |
-| 0 (removed) | 725 | 7 985 415 | **B manoeuvre** |
-| 10 | 678 | 7 475 780 | C severe gust |
-| 50 | 622 | 6 884 100 | C severe gust |
-| 100 | 564 | 6 271 400 | C severe gust |
-| 200 | 478 | 5 364 600 | C severe gust |
+## Verification
 
-Removing the severe block moves fracture to the manoeuvre block and lengthens
-the life: the governing boundary becomes 19.4 mm instead of 11.9 mm.
+**1213 automated tests**, no runtime dependencies. Verification rests on
+independent legs rather than self-consistency:
 
-**Threshold** (discontinuous, so not a smooth trend):
+- **Hand calculations** with literal expected values: `K`, `ΔK`, `R`, `da/dN`,
+  the Paris `C` unit conversion, `Y(a)`, and the closed-form life on both the
+  `m ≠ 2` and `m = 2` branches.
+- **Analytical vs numerical life** for constant `Y`, cross-checked over a
+  360-case sweep to 10⁻⁸ relative; neither routine calls the other.
+- **Scaling laws**: `K ∝ σ`, `K ∝ √a`, `ΔK ∝ Δσ`, `ΔK ∝ Y`, `da/dN ∝ ΔK^m`,
+  `N ∝ Δσ⁻ᵐ`, `a_c ∝ K_IC²`, `a_c ∝ σ_max⁻²`, `a_c ∝ Y⁻²`, `a_th ∝ ΔK_th²`.
+- **Round trips**: `K_max(a_c) = K_IC`; `σ_res(a_c) = σ_max`;
+  `ΔK(a_c)/K_IC = Δσ/σ_max`; `ΔK(a_th) = ΔK_th`;
+  `N(a_start → a_end) = n_block` for every block advance.
+- **Convergence**: Simpson O(h⁴) order measured (ratios 15.90/15.99/16.26 per
+  interval doubling), log-grid vs linear-grid efficiency measured, block-solve
+  tolerance and interval convergence measured.
+- **Limits**: the finite-width model reduces to the constant-`Y` model as
+  `W → ∞` (geometry factor, `ΔK`, critical size and life, at tightening
+  tolerances); a one-block spectrum reproduces the constant-amplitude life to
+  **6.2 × 10⁻¹⁰**.
+- **Policy guards**: the hard cutoff equals the unmodified Paris rate above
+  threshold and differs from both common alternative near-threshold laws; the
+  original no-threshold API still grows a sub-threshold crack; the arrested case
+  never reports "the life from `a_th` to `a_c`"; freezing `Y` at `Y(a₀)` changes
+  the answer, proving `Y(a)` is re-evaluated inside the integral.
+- **Solver safety**: deterministic, bracket never widened, never evaluated at
+  `W/2`, explicit statuses instead of `None`.
+- **Regression locks**: four dedicated modules pin the M1, M2, M3 and M4 canonical
+  numbers, public APIs and conventions, so a later milestone cannot silently move
+  an earlier result.
 
-| `ΔK_th` [MPa·√m] | Active at `a₀` | Activate later | Cycles | Status |
-| --- | --- | --- | --- | --- |
-| disabled | 3/3 | 0 | 4 018 100 | `FRACTURE_REACHED` |
-| 2.0 | 3/3 | 0 | 4 018 100 | `FRACTURE_REACHED` |
-| 3.0 | 2/3 | 1 | 4 517 600 | `FRACTURE_REACHED` |
-| 4.0 | 2/3 | 1 | 6 271 400 | `FRACTURE_REACHED` |
-| 5.0 | 2/3 | 1 | 7 325 900 | `FRACTURE_REACHED` |
-| 6.0 | 1/3 | 2 | 15 007 100 | `FRACTURE_REACHED` |
-| 8.0 | 0/3 | 0 | ∞ | `SPECTRUM_ARRESTED` |
+Tests near `ΔK ≈ ΔK_th` are built algebraically from the exact inverse and
+asserted on **normalised ratios** — `pytest.approx`'s default absolute tolerance
+is unsafe on differences approaching zero.
 
-A threshold below every block's `ΔK(a₀)` changes nothing at all; a high enough
-one arrests the entire spectrum.
+## Numerical methods and performance
 
-**Initial flaw**:
+- **M1 linear-`a` composite Simpson** — retained unchanged as the verified
+  historical baseline.
+- **M3 log-`a` composite Simpson** — geometry-aware; `Y` re-evaluated at every
+  abscissa, never factored out. Measured more accurate than the linear grid at
+  every interval count tested, by ~10 orders of magnitude at a span of 1000.
+- **M5 block advance** — inverts the integrated life by bounded bisection, with
+  the bracket seeded by a rigorous Euler lower bound (an explicit step
+  under-predicts growth because `da/dN` increases with `a`).
 
-| `a₀` [mm] | Active at `a₀` | Activate later | Cycles | Status |
-| --- | --- | --- | --- | --- |
-| 0.25 | 0/3 | 0 | ∞ | `SPECTRUM_ARRESTED` |
-| 0.50 | 1/3 | 2 | 18 514 700 | `FRACTURE_REACHED` |
-| 1.00 | 2/3 | 1 | 6 271 400 | `FRACTURE_REACHED` |
-| 2.00 | 2/3 | 1 | 2 386 400 | `FRACTURE_REACHED` |
-| 4.00 | 3/3 | 0 | 1 165 400 | `FRACTURE_REACHED` |
+Fixed grids, even interval counts required, no adaptive tolerances, no SciPy.
+Measured runtime: the canonical 565-spectrum simulation takes **≈ 1 s**
+(1698 block advances); the full test suite **≈ 25–70 s** depending on machine.
 
-**Low-block count** — the counter-intuitive one. Adding cycles of a block that is
-*arrested* adds cycles without adding growth, so total cycles to fracture **rise**
-(921 777 with the block removed → 21 564 100 at 50 000 cycles) even though the
-number of spectra needed **falls** (837 → 421). More low-amplitude cycles do not
-necessarily shorten the life measured in total cycles.
-
-Stress scale (0.75 → 1.25) shortens life monotonically, 24 275 600 → 2 364 200
-cycles. Toughness (20 → 50 MPa·√m) lengthens it with diminishing returns,
-5 549 900 → 6 682 100. Width (50 → 500 mm) lengthens it and converges,
-6 005 000 → 6 393 500.
-
-## Milestone 1 stress-range sensitivity (imposed endpoint)
-
-Both `σ_max` and `σ_min` are scaled, preserving `R` and varying only `Δσ`.
-`a₀ = 1 mm`, `a_f = 10 mm`.
-
-| Scale | `Δσ` [MPa] | Life [cycles] | `N / N_ref` | `scale^−m` |
-| --- | --- | --- | --- | --- |
-| 0.50 | 50 | 6 213 075.6 | 8.0000 | 8.0000 |
-| 0.75 | 75 | 1 840 911.3 | 2.3704 | 2.3704 |
-| 1.00 | 100 | 776 634.4 | 1.0000 | 1.0000 |
-| 1.25 | 125 | 397 636.8 | 0.5120 | 0.5120 |
-| 1.50 | 150 | 230 113.9 | 0.2963 | 0.2963 |
-
-The observed ratios reproduce `N ∝ (Δσ)^−m` exactly for the constant-`Y` Paris
-model, as required. A 50 % stress-range increase costs ~70 % of the life.
-
-## Milestone 1 initial-crack sensitivity (imposed endpoint)
-
-`a_f` fixed at the imposed 10 mm, canonical stress cycle and Paris curve.
-
-| `a₀` [mm] | `ΔK(a₀)` [MPa·√m] | Life [cycles] |
-| --- | --- | --- |
-| 0.5 | 3.9633 | 1 247 101.8 |
-| 1.0 | 5.6050 | 776 634.4 |
-| 2.0 | 7.9267 | 443 963.8 |
-| 4.0 | 11.2100 | 208 730.1 |
-
-Life falls steeply as the assumed initial flaw grows — an eightfold increase in
-`a₀` costs ~83 % of the life. Most of the life is spent while the crack is small
-and `ΔK` is low, which is why the assumed initial flaw size dominates the answer.
+Accuracy is set by the block-solve tolerance, not the interval count: 50, 100,
+200 and 400 intervals give an identical total cycle count and an identical final
+crack length to nine decimal places in mm. Because fracture is detected when a
+block begins or partway through it, **spectrum answers are quantised to whole
+blocks** — one spectrum is 0.177 % of the canonical life, and no sub-cycle
+accuracy is claimed.
 
 ## Limitations
 
-This model is a teaching-grade idealization. It is **not** a certification
-method and its output is **not** an inspection or safe-life interval.
+> **The predicted lives are deterministic screening outputs for illustrative
+> inputs, not certified inspection intervals or safe-life values.**
 
-> **The toughness-derived critical crack size is an LEFM screening boundary, not
-> a certified residual-strength allowable. The finite-width critical crack
-> length remains an LEFM screening boundary, not a certified residual-strength
-> allowable.**
->
-> **A threshold-arrested result is not a safe-life certification result; it only
-> means the modeled `ΔK` does not exceed the assumed constant `ΔK` threshold.**
->
-> **Sequence effects in this milestone arise only from evolving crack size,
-> threshold activation, and block-specific fracture checks; the model does not
-> represent overload retardation or other load-history memory.**
+**LEFM and geometry** — linear-elastic only; centre through crack only
+(no edge crack, hole crack, stiffener interaction, multiple-site damage or
+crack-front tunnelling); secant finite-width correction only; no thickness or
+state-of-stress validity check; no plastic-zone check; no net-section collapse;
+ligament fraction is a **diagnostic only**, never a criterion.
 
-- **LEFM only** — small-scale yielding assumed throughout.
-- **Centre crack only** — no edge crack, no fastener-hole crack, no corner or
-  surface flaw, and no multiple-site damage or crack interaction.
-- **The finite-width correction is still idealized LEFM.** The secant formula is
-  a standard closed-form idealization for an isolated centre crack in a plain
-  panel; it models no stiffener interaction, no load redistribution into
-  surrounding structure, no crack-front curvature or tunnelling, and no
-  thickness or state-of-stress correction.
-- **Ligament fraction is diagnostic only** — reported for interpretation, never
-  used as a criterion and never blended into the fracture margin. There is no
-  net-section-collapse model, so for a short ligament this screen will still
-  report a fracture boundary where collapse would realistically govern first.
-- **Milestones 1–2 use a constant geometry factor** with no finite-width
-  correction; that constant-`Y` model is retained deliberately as the
-  infinite-plate reference and regression baseline.
-- **Constant-amplitude loading only.**
-- **No crack closure** — a compressive `σ_min` contributes in full to `Δσ`.
-- **`ΔK_th` is illustrative** unless genuinely sourced — not measured, not a
-  design allowable, no alloy claimed.
-- **The threshold is a single constant.** It carries no dependence on stress
-  ratio `R`, environment, temperature, load history, or crack size.
-- **No crack-closure model.** `ΔK` remains the algebraic range, so a compressive
-  `σ_min` inflates it and can make a crack look active that a closure-aware
-  model would arrest.
-- **No near-threshold growth law.** The cutoff is a hard, discontinuous switch,
-  not a smooth roll-off; the predicted life is either the full no-threshold life
-  or infinity, with nothing in between.
-- **"Infinite life" means only zero propagation under this exact
-  constant-amplitude cycle.** It is not total structural durability, says
-  nothing about crack initiation, and covers no corrosion or fretting damage.
-- The Milestone 1–3 growth path applies **no threshold at all** and is retained
-  deliberately as the regression baseline.
-- **The spectrum is illustrative, not measured flight data.** No aircraft,
-  certification spectrum, gust standard, manufacturer loads or regulatory load
-  history is claimed.
-- **Blocks are piecewise constant.** There is no rainflow extraction, no
-  arbitrary time-history input, and no cycle-by-cycle stress variability within
-  a block.
-- **No overload retardation**, no Wheeler/Willenborg model, no crack-closure
-  memory, no residual-stress history and no plastic-zone history.
-- **No interaction between consecutive blocks beyond the evolving crack size.**
-  The crack length is the only state carried forward — a deliberately strong
-  restriction, and the reason the measured sequence effect is small here.
-- **No inspection or maintenance model**, and no damage-tolerance interval is
-  derived from any of this.
-- **No fracture-toughness cutoff.**
-- **No residual-strength model.**
-- **Constant `K_IC`** — a single value, with no thickness or state-of-stress
-  validity check and no plane-stress/plane-strain transition model. Real
-  toughness depends strongly on section thickness.
-- **`K_IC` is illustrative** unless genuinely sourced — not measured, not a
-  design allowable, no alloy claimed.
-- **No plastic-zone check or correction**; no elastic-plastic fracture
-  mechanics. A `K_IC`-based critical crack size becomes questionable if
-  small-scale yielding is violated — that is, if the plastic zone is not small
-  relative to the crack length, the remaining ligament and the thickness. This
-  model performs no such check, so it will report a critical size even where
-  LEFM does not apply.
-- **No net-section collapse check** — for large cracks or low toughness the net
-  section may yield before the reported residual strength is reached, in which
-  case collapse, not fracture, governs.
-- **No ligament correction** and no finite-width correction, so the residual
-  strength does not fall off as the crack approaches a boundary.
-- **No proof load** and no load-factor, scatter or material-variability
-  allowance in the reported margin.
-- **No retardation or overload effects.**
-- **No variable-amplitude spectrum**, rainflow counting, or damage summation.
-- **No R-ratio dependence** in the Paris coefficients; no Forman/Walker/NASGRO.
-  The maximum-stress sweep therefore changes `R` without changing `da/dN`, which
-  is a property of this model, not of real material behaviour.
-- **No environmental effects** (corrosion, humidity).
-- **No temperature effects.**
-- **No probabilistic scatter** — the result is a single deterministic value, and
-  real crack-growth data scatter by a factor of several.
-- **Illustrative Paris data** — not measured, not a design allowable, no alloy
-  claimed.
-- **Single crack** — no multiple-site damage or crack interaction.
+**Paris and threshold** — illustrative Paris data, `K_IC` and `ΔK_th`; all
+treated as constants; no `R`-ratio dependence; no crack closure; no
+near-threshold growth law; no Walker/Forman/NASGRO; no environmental,
+temperature, corrosion or fretting effects. The hard cutoff is discontinuous:
+either the full no-threshold life or infinity, with nothing in between.
 
-## Package structure
+**Variable amplitude** — the spectrum is illustrative, not flight data; ordered
+piecewise-constant blocks; no rainflow extraction; no overload retardation, no
+Wheeler/Willenborg, no plastic-zone, residual-stress or crack-closure memory;
+**the only state carried between blocks is crack length**; no within-block
+variability; no inspection or repair model.
+
+**Design and certification** — no proof load, no inspection interval, no
+damage-tolerance substantiation, no probabilistic scatter, no reliability or
+fleet variability, no optimization.
+
+## Data provenance
+
+All material data and the load spectrum are **illustrative**, chosen after
+auditing their numerical consequences — never tuned to manufacture a result.
+No aircraft, manufacturer, alloy qualification, certification spectrum or
+regulatory load history is claimed.
+
+| Input | Value | Banner carried in code |
+| --- | --- | --- |
+| Paris curve | `C` = 1.0×10⁻¹¹ (MPa·√m basis), `m` = 3.0 | `ILLUSTRATIVE PARIS-LAW INPUT — NOT DESIGN ALLOWABLE` |
+| Fracture toughness | `K_IC` = 30 MPa·√m | `ILLUSTRATIVE FRACTURE-TOUGHNESS INPUT — NOT DESIGN ALLOWABLE` |
+| Threshold | `ΔK_th` = 4 MPa·√m | `ILLUSTRATIVE CRACK-GROWTH THRESHOLD INPUT — NOT DESIGN ALLOWABLE` |
+| Load spectrum | 3-block, 100:10:1 exceedance | `ILLUSTRATIVE VARIABLE-AMPLITUDE STRESS SPECTRUM — NOT FLIGHT LOAD DATA` |
+
+## Repository structure
 
 ```
-wing-skin-crack-growth/
-├── pyproject.toml
-├── README.md
-├── src/crackgrowth/
-│   ├── __init__.py           public API
-│   ├── _validation.py        finite / positivity input guards
-│   ├── geometry.py           ThroughCrackGeometry
-│   ├── loading.py            StressCycle
-│   ├── stress_intensity.py   K and ΔK
-│   ├── paris.py              ParisLaw, unit conversion, da/dN
-│   ├── integration.py        analytical reference + Simpson quadrature
-│   ├── sensitivity.py        single-parameter sweeps
-│   └── canonical.py          the canonical wing-skin case
-├── tests/                    520 tests
-└── examples/
-    └── wing_skin_crack_growth.py
+src/crackgrowth/
+├── geometry.py                 constant-Y through crack
+├── loading.py                  StressCycle
+├── stress_intensity.py         K and ΔK
+├── paris.py                    ParisLaw, unit conversion, da/dN
+├── integration.py              closed form + linear-a Simpson
+├── sensitivity.py              constant-Y sweeps
+├── fracture.py                 toughness, a_c, residual strength
+├── fracture_life.py            admissibility, life to the boundary
+├── fracture_sensitivity.py     fracture sweeps
+├── finite_width.py             geometry protocol, Y(a), ligaments
+├── integration_log.py          geometry-aware log-a Simpson
+├── finite_width_fracture.py    bisection solver for a_c
+├── finite_width_life.py        finite-width life
+├── finite_width_sensitivity.py width / stress / toughness sweeps
+├── threshold.py                ΔK_th, hard cutoff, a_th solver
+├── threshold_life.py           growth-state classification
+├── threshold_sensitivity.py    threshold sweeps
+├── spectrum.py                 SpectrumBlock, ordered LoadSpectrum
+├── spectrum_growth.py          per-block advance by integral inversion
+├── spectrum_life.py            repeated-spectrum simulation
+├── spectrum_sensitivity.py     spectrum sweeps
+└── canonical.py                the canonical wing-skin case
+
+tests/       1213 tests, including four milestone regression locks
+examples/    five milestone studies + final assessment + figure generation
+figures/     four portfolio figures (regenerable, byte-deterministic)
 ```
 
-## Install, test, run
-
-From a clean virtual environment:
+## Reproduction
 
 ```bash
 python3 -m venv .venv
@@ -1597,144 +425,64 @@ Run the full test suite:
 python -m pytest -q
 ```
 
-Run the Milestone 1 sanity case (imposed 10 mm endpoint):
+Run the final integrated assessment (~40 s):
+
+```bash
+python examples/final_crack_growth_assessment.py
+```
+
+Run the individual milestone studies:
 
 ```bash
 python examples/wing_skin_crack_growth.py
-```
-
-Run the Milestone 2 study (toughness-derived critical crack size):
-
-```bash
 python examples/critical_crack_growth.py
-```
-
-Run the Milestone 3 study (finite-width panel):
-
-```bash
 python examples/finite_width_crack_growth.py
-```
-
-Run the Milestone 4 study (threshold screen):
-
-```bash
 python examples/crack_growth_threshold.py
-```
-
-Run the Milestone 5 study (variable-amplitude spectrum, takes about 30 s):
-
-```bash
 python examples/variable_amplitude_spectrum.py
 ```
+
+Regenerate the figures (needs the optional plotting extra):
+
+```bash
+python -m pip install -e ".[figures]"
+python examples/make_figures.py
+```
+
+Figures are byte-identical on repeated runs within one matplotlib/FreeType
+environment; PNG bytes may differ across matplotlib or FreeType versions even
+though the plotted data are unchanged. Generated with matplotlib 3.11.1 on
+Python 3.14.
 
 ## Minimal usage
 
 ```python
 from crackgrowth import (
-    StressCycle, ThroughCrackGeometry, paris_law_from_mpa_basis,
-    cycles_to_crack_length, analytical_cycles_to_crack_length,
-)
-
-geometry = ThroughCrackGeometry(geometry_factor=1.0)
-cycle = StressCycle(sigma_max=120.0e6, sigma_min=20.0e6)   # Pa
-law = paris_law_from_mpa_basis(
-    c_mpa=1.0e-11, m=3.0,
-    name="illustrative",
-    source_note="ILLUSTRATIVE PARIS-LAW INPUT - NOT DESIGN ALLOWABLE",
-)
-
-result = cycles_to_crack_length(1.0e-3, 10.0e-3, cycle, geometry, law)
-print(result.predicted_cycles)  # 776634.4447
-```
-
-Growing to the fracture boundary instead of an imposed target:
-
-```python
-from crackgrowth import (
-    FractureToughness, mpa_sqrt_m_to_pa_sqrt_m, cycles_to_critical_crack,
-)
-
-toughness = FractureToughness(
-    name="illustrative",
-    k_ic=mpa_sqrt_m_to_pa_sqrt_m(30.0),                       # MPa√m -> Pa√m
-    source_note="ILLUSTRATIVE FRACTURE-TOUGHNESS INPUT - NOT DESIGN ALLOWABLE",
-)
-
-result = cycles_to_critical_crack(1.0e-3, cycle, geometry, law, toughness)
-print(result.critical_crack_length)   # 0.019894367886486918 m
-print(result.admissibility)           # FlawAdmissibility.BELOW_CRITICAL
-print(result.predicted_cycles)        # 881160.7850
-```
-
-Accounting for finite panel width (`a` is the HALF crack length):
-
-```python
-from crackgrowth import FiniteWidthCenterCrack, cycles_to_finite_width_fracture
-
-panel = FiniteWidthCenterCrack(plate_width=100.0e-3)     # W = 100 mm
-
-result = cycles_to_finite_width_fracture(1.0e-3, cycle, panel, law, toughness)
-print(result.critical_crack_length)          # 0.017093952819407475 m
-print(result.critical.geometry_factor_at_critical)   # 1.078807
-print(result.ligament_fraction_at_critical)  # 0.658121  (diagnostic only)
-print(result.predicted_cycles)               # 842070.5528
-```
-
-Screening against a crack-growth threshold:
-
-```python
-from crackgrowth import (
-    CrackGrowthThreshold, mpa_sqrt_m_to_pa_sqrt_m,
-    cycles_to_fracture_with_threshold,
-)
-
-threshold = CrackGrowthThreshold(
-    name="illustrative",
-    delta_k_threshold=mpa_sqrt_m_to_pa_sqrt_m(4.0),
-    source_note="ILLUSTRATIVE CRACK-GROWTH THRESHOLD INPUT - NOT DESIGN ALLOWABLE",
-)
-
-result = cycles_to_fracture_with_threshold(
-    1.0e-3, cycle, panel, law, toughness, threshold
-)
-print(result.state)                   # GrowthState.ACTIVE_GROWTH
-print(result.threshold_ratio)         # 1.401594  (>1 means growing)
-print(result.threshold_crack_length)  # 0.0005092306461735948 m
-print(result.predicted_cycles)        # 842070.5528  -- identical to Milestone 3
-
-# A smaller flaw is arrested outright:
-arrested = cycles_to_fracture_with_threshold(
-    0.25e-3, cycle, panel, law, toughness, threshold
-)
-print(arrested.state)              # GrowthState.ARRESTED_BELOW_THRESHOLD
-print(arrested.predicted_cycles)   # inf
-
-# Pass threshold=None to disable the screen and reproduce Milestone 3.
-```
-
-Running a repeating variable-amplitude spectrum:
-
-```python
-from crackgrowth import (
-    CANONICAL_SPECTRUM, SpectrumBlock, LoadSpectrum,
-    simulate_repeated_spectrum,
+    CANONICAL_FINITE_WIDTH_GEOMETRY, CANONICAL_PARIS_LAW,
+    CANONICAL_FRACTURE_TOUGHNESS, CANONICAL_GROWTH_THRESHOLD,
+    CANONICAL_SPECTRUM, simulate_repeated_spectrum,
 )
 
 result = simulate_repeated_spectrum(
-    1.0e-3, CANONICAL_SPECTRUM, panel, law, toughness, threshold
+    1.0e-3,                            # a0 = 1 mm HALF crack length
+    CANONICAL_SPECTRUM,
+    CANONICAL_FINITE_WIDTH_GEOMETRY,   # W = 100 mm
+    CANONICAL_PARIS_LAW,
+    CANONICAL_FRACTURE_TOUGHNESS,
+    CANONICAL_GROWTH_THRESHOLD,        # None disables the threshold screen
 )
-print(result.status)                  # SpectrumStatus.FRACTURE_REACHED
-print(result.total_cycles)            # 6282500.0  -- actual stress cycles
-print(result.completed_full_spectra)  # 565
-print(result.fracture_block_name)     # 'C severe gust'
-print(result.fracture_cycle_within_block)  # 0.0 -- fractures as the block begins
+print(result.status)                   # SpectrumStatus.FRACTURE_REACHED
+print(result.total_cycles)             # 6282500.0  -- actual stress cycles
+print(result.fracture_block_name)      # 'C severe gust'
 
-for c in result.contributions:        # crack extension, NOT Miner damage
+for c in result.contributions:         # crack extension, NOT Miner damage
     print(c.block_name, c.extension_fraction, c.first_active_repeat)
 ```
 
 ## License
 
-**No license has been chosen for this repository.** No `LICENSE` file is
-present and no license metadata is declared, so default copyright applies and
-no permissions are granted to others. A license may be added later.
+Released under the **MIT License** — see [LICENSE](LICENSE).
+
+The licence covers the source code. It grants no warranty of any kind, and
+in particular makes no representation that the analysis is fit for design,
+certification or airworthiness purposes: the material data and load spectrum
+are illustrative, and the outputs are screening results only.
