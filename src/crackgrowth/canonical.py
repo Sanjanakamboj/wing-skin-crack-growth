@@ -11,10 +11,18 @@ Every number here is an explicit engineering assumption, not a design input:
   not derived from fracture toughness and is NOT a critical crack size.
 * Paris curve           -- illustrative; see
   :data:`crackgrowth.paris.ILLUSTRATIVE_ALUMINIUM_LIKE_PARIS`.
+* ``K_IC = 30 MPa*sqrt(m)`` -- illustrative (Milestone 2); gives a critical
+  crack length of 19.89 mm for this cycle. See
+  :data:`crackgrowth.fracture.ILLUSTRATIVE_ALUMINIUM_LIKE_TOUGHNESS`.
+
+``CANONICAL_TARGET_CRACK_LENGTH`` remains the Milestone 1 IMPOSED target and
+is retained unchanged for regression. Milestone 2 derives its own endpoint
+from toughness instead; the two are deliberately different.
 """
 
 from __future__ import annotations
 
+from .fracture import ILLUSTRATIVE_ALUMINIUM_LIKE_TOUGHNESS
 from .geometry import INFINITE_PLATE_THROUGH_CRACK
 from .loading import StressCycle
 from .paris import ILLUSTRATIVE_ALUMINIUM_LIKE_PARIS
@@ -25,6 +33,7 @@ __all__ = [
     "CANONICAL_PARIS_LAW",
     "CANONICAL_INITIAL_CRACK_LENGTH",
     "CANONICAL_TARGET_CRACK_LENGTH",
+    "CANONICAL_FRACTURE_TOUGHNESS",
 ]
 
 CANONICAL_GEOMETRY = INFINITE_PLATE_THROUGH_CRACK
@@ -35,4 +44,9 @@ CANONICAL_PARIS_LAW = ILLUSTRATIVE_ALUMINIUM_LIKE_PARIS
 CANONICAL_INITIAL_CRACK_LENGTH = 1.0e-3
 
 #: Imposed target crack length [m]. NOT a fracture-toughness-derived critical size.
+#: Retained from Milestone 1 for regression; Milestone 2 supersedes it with
+#: a toughness-derived critical size.
 CANONICAL_TARGET_CRACK_LENGTH = 10.0e-3
+
+#: Canonical illustrative mode-I fracture toughness (Milestone 2).
+CANONICAL_FRACTURE_TOUGHNESS = ILLUSTRATIVE_ALUMINIUM_LIKE_TOUGHNESS
