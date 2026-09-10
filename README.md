@@ -25,6 +25,12 @@ The engineering question Milestone 3 answers:
 > toughness-derived critical crack size, and shorten Paris-law life relative to
 > the infinite-plate `Y = 1` reference?
 
+The engineering question Milestone 4 answers:
+
+> Under constant-amplitude loading, does the initial crack have enough `ΔK` to
+> grow at all, and if so, how many cycles remain before the finite-width
+> toughness boundary is reached?
+
 ## Scope (Milestone 1)
 
 Implemented:
@@ -70,6 +76,19 @@ Added, without altering any Milestone 1 or 2 mechanics:
   Milestone 1 linear-grid integrator
 - width, initial-flaw, stress and toughness sensitivity sweeps, a geometry
   amplification table, and ligament diagnostics
+
+## Scope (Milestone 4)
+
+Added, without altering any Milestone 1–3 mechanics:
+
+- a constant-amplitude crack-growth threshold `ΔK_th`, applied as a **hard
+  cutoff** on a new code path
+- a threshold-aware growth rate, alongside the unchanged no-threshold rate
+- growth/no-growth classification: active, at threshold, arrested, at or beyond
+  the fracture boundary, or no tensile fracture boundary
+- exact (constant-`Y`) and numerically solved (finite-width) threshold crack size
+- a diagnostic comparison of the threshold and fracture boundaries
+- threshold, initial-flaw, stress, width and toughness sensitivity sweeps
 
 Not implemented — see [Limitations](#limitations).
 
@@ -487,6 +506,99 @@ hold with a crack-size-dependent `Y`. Beyond `n ≈ 1000` the result sits at the
 floating-point floor, so no order can be claimed there. The case is already
 accurate to 2 × 10⁻⁹ at just 50 intervals.
 
+## Crack-growth threshold (Milestone 4)
+
+`CrackGrowthThreshold` stores `ΔK_th` on the SI basis (Pa·√m) with a mandatory
+provenance note. It reuses `mpa_sqrt_m_to_pa_sqrt_m` — the *same* conversion
+helper the fracture toughness uses, so there is one unit-conversion path in the
+package, not two.
+
+### Hard-cutoff policy
+
+```
+ΔK ≤ ΔK_th   →   da/dN = 0
+ΔK >  ΔK_th   →   da/dN = C · ΔK^m        (the unchanged Paris rate)
+```
+
+Two properties matter and are stated rather than buried:
+
+- **Equality belongs to the no-growth side.** A crack exactly at threshold does
+  not grow.
+- **The Paris rate is not modified above threshold.** This model does *not* use
+  `C·(ΔK − ΔK_th)^m` or `C·(ΔK^m − ΔK_th^m)`; those are different
+  near-threshold laws and are out of scope. Tests assert the result differs from
+  both.
+
+The original `crack_growth_rate` and `crack_growth_rate_for_geometry` are
+untouched and still apply **no** threshold at all — they remain the regression
+baseline, and a test confirms they still grow a crack far below threshold.
+
+### No crack closure
+
+`ΔK` is unchanged: `ΔK = Y(a)·(σ_max − σ_min)·sqrt(π·a)`. It is **not** modified
+by `K_min`, by `R`, by compression, or by any crack-opening level. This is a
+threshold model, not a closure model. A compressive `σ_min` therefore still
+inflates the algebraic `ΔK` and can make a crack look active that a
+closure-aware model would arrest — covered by an explicit test.
+
+### Threshold excess ratio, not a safety margin
+
+```
+threshold_ratio        = ΔK / ΔK_th
+threshold_excess_ratio = ΔK / ΔK_th − 1
+```
+
+Deliberately **not** called a margin of safety: the sign convention is the
+opposite of a strength margin. **Positive means the crack is being driven above
+threshold and therefore grows** — the adverse case, not the safe one.
+
+### Threshold crack size
+
+For constant `Y` there is a closed form:
+
+```
+a_th = (1/π) · ( ΔK_th / (Y · Δσ) )²
+```
+
+verified to scale exactly as `a_th ∝ ΔK_th²`, `a_th ∝ Δσ⁻²`, `a_th ∝ Y⁻²`. For a
+finite-width panel `Y = Y(a)` and the condition is implicit, so it is solved by
+the same bounded, deterministic, bracket-safe bisection used for the Milestone 3
+fracture boundary — never widening the bracket, never evaluating at `W/2`, with
+the tolerance exposed and explicit statuses for zero stress range, a lower bound
+already above threshold, and no root in the bracket.
+
+Cross-checked two ways: on a very wide panel the numerical root matches the exact
+constant-`Y` formula to 5 × 10⁻¹⁰ relative, and at `W = 100 mm` it differs from
+it by 1.3 × 10⁻⁴ relative (`Y > 1`, so the threshold is reached at a slightly
+*smaller* crack).
+
+### The arrest rule that matters most
+
+A crack whose `ΔK` is at or below `ΔK_th` has `da/dN = 0`. Because it does not
+grow **at all**, it can never reach `a_th` on its own. The remaining
+crack-growth life is therefore `+∞`.
+
+It is emphatically **not** "the life from `a_th` to `a_c`". The crack is never
+advanced to `a_th` first, and no such life is ever reported — doing so would
+silently teleport the crack past the arrest the model just predicted. A test
+asserts the reported life differs from that quantity.
+
+### Threshold vs fracture boundary
+
+| Ordering | Meaning |
+| --- | --- |
+| `a_th < a_c` | an active-growth interval `a_th < a < a_c` exists |
+| `a_th = a_c` | growth begins exactly at fracture |
+| `a_th > a_c` | no growth interval before fracture |
+
+For this monotonic geometry a growth interval requires roughly
+`ΔK_th < ΔK(a_c) = (Δσ/σ_max)·K_IC`. In the canonical case that is
+`4.00 < 25.00 MPa·√m`. When `a_th > a_c`, a crack below `a_c` stays arrested
+indefinitely — it cannot grow into the fracture boundary under the same constant
+amplitude, and the model does not invent growth to bridge the gap.
+
+`ΔK_th / K_IC` is reported as a **diagnostic only**, never as a criterion.
+
 ## Analytical reference
 
 For constant `Y` and constant `Δσ`, `da/dN = C·(Y·Δσ·√π)^m · a^(m/2)`, so
@@ -579,6 +691,22 @@ Milestone 3 adds a sixth leg:
    freezing `Y` at `Y(a₀)` is shown to change the answer, proving `Y(a)` is
    re-evaluated throughout the integration. A second regression module locks the
    Milestone 2 fracture results.
+
+Milestone 4 adds a seventh leg:
+
+7. **Policy and separation checks.** The hard cutoff is asserted to be exactly
+   the unmodified Paris rate above threshold and exactly zero at or below it,
+   and to differ from both common alternative near-threshold laws; the original
+   no-threshold rate is shown still to grow a sub-threshold crack; the threshold
+   verdict is shown independent of `K_IC` and of `σ_max` at fixed `Δσ`; the
+   arrested case is shown *not* to report the life from `a_th` to `a_c`; and the
+   numerical threshold root is cross-checked against the exact constant-`Y`
+   formula. A third regression module locks the Milestone 3 finite-width results.
+
+Boundary tests near `ΔK ≈ ΔK_th` are built algebraically from the exact inverse
+rather than from decimal literals, and are asserted on **normalised ratios** —
+`pytest.approx` with a default absolute tolerance is unsafe on quantities whose
+difference approaches zero.
 
 ### A note on quadrature span
 
@@ -894,6 +1022,137 @@ would realistically start to govern.
 `Y` is within 0.3 % of unity below `a/W ≈ 0.03` and climbs steeply past
 `a/W ≈ 0.3`.
 
+## Representative result — Milestone 4 (threshold screen)
+
+Same panel, cycle, Paris curve and toughness; `ΔK_th = 4 MPa·√m`.
+
+The threshold was chosen after auditing 2, 3, 4, 5, 6, 8 and 10 MPa·√m against
+`ΔK(a₀) = 5.6064 MPa·√m`: values up to 5 leave the initial crack active, 6 and
+above arrest it. 4 MPa·√m is a round value in the range usually quoted for
+aluminium alloys at moderate stress ratio and places `a_th` at 0.51 mm. It was
+**not** chosen to guarantee active growth — 5 MPa·√m would also have been active.
+
+| Initial crack state | Value |
+| --- | --- |
+| `Y(a₀)` | 1.000247 |
+| `K_max(a₀)` | 6.7276 MPa·√m |
+| `ΔK(a₀)` | 5.6064 MPa·√m |
+| `ΔK(a₀)/ΔK_th` | 1.401594 |
+| Threshold excess ratio | +0.401594 (positive ⇒ **growing**) |
+| **State** | **`ACTIVE_GROWTH`** |
+
+| Boundaries | Value |
+| --- | --- |
+| Threshold crack `a_th` | 0.5092 mm |
+| Fracture crack `a_c` | 17.0940 mm |
+| `a_th / a_c` | 0.029790 |
+| Ordering | `ACTIVE_INTERVAL_EXISTS` |
+| `ΔK(a_th)` | 4.0000 MPa·√m (`= ΔK_th`) |
+| `ΔK(a_c)` | 25.0000 MPa·√m |
+| `ΔK_th / K_IC` | 0.1333 (diagnostic only) |
+| Ligament fraction at `a_th` / `a_c` | 0.989815 / 0.658121 (diagnostic only) |
+
+| Life | Value |
+| --- | --- |
+| Threshold-aware | 842 070.5528 cycles |
+| Milestone 3, no threshold | 842 070.5528 cycles |
+| Difference | **0.000000 — bit-for-bit identical** |
+
+### The key negative result
+
+Because the hard cutoff does not modify the Paris rate above threshold, an
+already-growing crack has **exactly** the Milestone 3 life. The threshold buys
+no extra cycles; it only changes the verdict. And when the initial crack is at
+or below threshold, the life is **infinite, not merely longer**.
+
+So the model is **discontinuous**: the answer is either the full no-threshold
+life or infinity, with nothing in between. That is a property of the chosen
+simplified cutoff, not of the material, and it is reported rather than smoothed.
+
+## Threshold sensitivity
+
+`a₀ = 1 mm`, `W = 100 mm`, canonical cycle. "Disabled" means the screen is off,
+which reproduces Milestone 3 exactly.
+
+| `ΔK_th` [MPa·√m] | `ΔK(a₀)/ΔK_th` | `a_th` [mm] | State | Life [cycles] |
+| --- | --- | --- | --- | --- |
+| disabled | — | — | `ACTIVE_GROWTH` | 842 070.6 |
+| 2.0 | 2.803187 | 0.1273 | `ACTIVE_GROWTH` | 842 070.6 |
+| 3.0 | 1.868792 | 0.2865 | `ACTIVE_GROWTH` | 842 070.6 |
+| **4.0** | **1.401594** | **0.5092** | **`ACTIVE_GROWTH`** | **842 070.6** |
+| 5.0 | 1.121275 | 0.7955 | `ACTIVE_GROWTH` | 842 070.6 |
+| 5.5 | 1.019341 | 0.9624 | `ACTIVE_GROWTH` | 842 070.6 |
+| 5.6 | 1.001138 | 0.9977 | `ACTIVE_GROWTH` | 842 070.6 |
+| 5.7 | 0.983574 | 1.0336 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
+| 6.0 | 0.934396 | 1.1452 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
+| 8.0 | 0.700797 | 2.0330 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
+| 10.0 | 0.560637 | 3.1674 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
+
+The life column takes exactly **two** values across the whole sweep — a step,
+not a trend. The crossing sits between 5.6 and 5.7, i.e. at
+`ΔK(a₀) = 5.6064 MPa·√m`, as it must.
+
+## Initial-crack sensitivity with threshold
+
+`ΔK_th = 4 MPa·√m`, `W = 100 mm`, canonical cycle.
+
+| `a₀` [mm] | `ΔK(a₀)` [MPa·√m] | Ratio | State | Life [cycles] |
+| --- | --- | --- | --- | --- |
+| 0.10 | 1.7725 | 0.4431 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
+| 0.25 | 2.8025 | 0.7006 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
+| 0.50 | 3.9636 | 0.9909 | `ARRESTED_BELOW_THRESHOLD` | ∞ |
+| 1.00 | 5.6064 | 1.4016 | `ACTIVE_GROWTH` | 842 070.6 |
+| 2.00 | 7.9345 | 1.9836 | `ACTIVE_GROWTH` | 509 912.1 |
+| 4.00 | 11.2544 | 2.8136 | `ACTIVE_GROWTH` | 276 124.8 |
+| 8.00 | 16.1084 | 4.0271 | `ACTIVE_GROWTH` | 113 856.3 |
+
+A **genuine transition**: flaws at or below 0.5 mm arrest, 1 mm and above grow.
+This was reported, not engineered — the 0.5 mm row sits at ratio 0.9909, just
+under the cutoff, purely as a consequence of the audited inputs.
+
+## Stress-range sensitivity with threshold
+
+`σ_min = 20 MPa` fixed, so both the driving range and the fracture boundary move.
+
+| `σ_max` [MPa] | `Δσ` [MPa] | `ΔK(a₀)` [MPa·√m] | Ratio | `a_c` [mm] | State | Life [cycles] |
+| --- | --- | --- | --- | --- | --- | --- |
+| 40 | 20 | 1.1213 | 0.2803 | 42.3915 | `ARRESTED` | ∞ |
+| 60 | 40 | 2.2425 | 0.5606 | 35.3486 | `ARRESTED` | ∞ |
+| 80 | 60 | 3.3638 | 0.8410 | 28.2552 | `ARRESTED` | ∞ |
+| 100 | 80 | 4.4851 | 1.1213 | 22.0467 | `ACTIVE` | 1 692 185.2 |
+| 120 | 100 | 5.6064 | 1.4016 | 17.0940 | `ACTIVE` | 842 070.6 |
+| 140 | 120 | 6.7276 | 1.6819 | 13.3496 | `ACTIVE` | 469 773.3 |
+| 160 | 140 | 7.8489 | 1.9622 | 10.5783 | `ACTIVE` | 283 281.0 |
+| 180 | 160 | 8.9702 | 2.2425 | 8.5266 | `ACTIVE` | 180 709.2 |
+
+A second genuine transition, between `σ_max` = 80 and 100 MPa.
+
+## Fixed-`Δσ` distinction under a threshold
+
+`Δσ` held at 100 MPa, `σ_min = σ_max − 100 MPa`.
+
+| `σ_max` [MPa] | `ΔK(a₀)` [MPa·√m] | Ratio | `a_th` [mm] | `a_c` [mm] | Life [cycles] |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 5.606375 | 1.401594 | 0.5092 | 22.0467 | 866 398.8 |
+| 120 | 5.606375 | 1.401594 | 0.5092 | 17.0940 | 842 070.6 |
+| 140 | 5.606375 | 1.401594 | 0.5092 | 13.3496 | 811 768.2 |
+| 160 | 5.606375 | 1.401594 | 0.5092 | 10.5783 | 777 323.0 |
+| 180 | 5.606375 | 1.401594 | 0.5092 | 8.5266 | 740 185.0 |
+
+`ΔK(a₀)`, the ratio and `a_th` are **identical down the column**: the threshold
+sees only `Δσ`. The life changes purely because `K_max` moves the fracture
+endpoint. This is the Milestone 2/3 `K_max`/`ΔK` separation, now extended to
+show that the *threshold criterion* is likewise blind to `σ_max`.
+
+The same separation holds for toughness: `K_IC` does not enter `ΔK`, so across
+`K_IC` = 20–60 MPa·√m the threshold verdict and `a_th` are unchanged to 12
+significant figures while `a_c` moves from 8.53 to 35.35 mm and the life from
+740 185 to 892 339 cycles.
+
+Width acts only through `Y(a₀)`: from `W` = 40 to 500 mm the ratio moves just
+0.15 % (1.403413 → 1.401262), so no width in that sweep crosses the threshold,
+though the life still moves strongly through `a_c`.
+
 ## Milestone 1 stress-range sensitivity (imposed endpoint)
 
 Both `σ_max` and `σ_min` are scaled, preserving `R` and varying only `Δσ`.
@@ -934,6 +1193,9 @@ method and its output is **not** an inspection or safe-life interval.
 > a certified residual-strength allowable. The finite-width critical crack
 > length remains an LEFM screening boundary, not a certified residual-strength
 > allowable.**
+>
+> **A threshold-arrested result is not a safe-life certification result; it only
+> means the modeled `ΔK` does not exceed the assumed constant `ΔK` threshold.**
 
 - **LEFM only** — small-scale yielding assumed throughout.
 - **Centre crack only** — no edge crack, no fastener-hole crack, no corner or
@@ -952,7 +1214,21 @@ method and its output is **not** an inspection or safe-life interval.
   infinite-plate reference and regression baseline.
 - **Constant-amplitude loading only.**
 - **No crack closure** — a compressive `σ_min` contributes in full to `Δσ`.
-- **No `ΔK` threshold** — every non-zero range produces some growth.
+- **`ΔK_th` is illustrative** unless genuinely sourced — not measured, not a
+  design allowable, no alloy claimed.
+- **The threshold is a single constant.** It carries no dependence on stress
+  ratio `R`, environment, temperature, load history, or crack size.
+- **No crack-closure model.** `ΔK` remains the algebraic range, so a compressive
+  `σ_min` inflates it and can make a crack look active that a closure-aware
+  model would arrest.
+- **No near-threshold growth law.** The cutoff is a hard, discontinuous switch,
+  not a smooth roll-off; the predicted life is either the full no-threshold life
+  or infinity, with nothing in between.
+- **"Infinite life" means only zero propagation under this exact
+  constant-amplitude cycle.** It is not total structural durability, says
+  nothing about crack initiation, and covers no corrosion or fretting damage.
+- The Milestone 1–3 growth path applies **no threshold at all** and is retained
+  deliberately as the regression baseline.
 - **No fracture-toughness cutoff.**
 - **No residual-strength model.**
 - **Constant `K_IC`** — a single value, with no thickness or state-of-stress
@@ -1042,6 +1318,12 @@ Run the Milestone 3 study (finite-width panel):
 python examples/finite_width_crack_growth.py
 ```
 
+Run the Milestone 4 study (threshold screen):
+
+```bash
+python examples/crack_growth_threshold.py
+```
+
 ## Minimal usage
 
 ```python
@@ -1093,6 +1375,38 @@ print(result.critical_crack_length)          # 0.017093952819407475 m
 print(result.critical.geometry_factor_at_critical)   # 1.078807
 print(result.ligament_fraction_at_critical)  # 0.658121  (diagnostic only)
 print(result.predicted_cycles)               # 842070.5528
+```
+
+Screening against a crack-growth threshold:
+
+```python
+from crackgrowth import (
+    CrackGrowthThreshold, mpa_sqrt_m_to_pa_sqrt_m,
+    cycles_to_fracture_with_threshold,
+)
+
+threshold = CrackGrowthThreshold(
+    name="illustrative",
+    delta_k_threshold=mpa_sqrt_m_to_pa_sqrt_m(4.0),
+    source_note="ILLUSTRATIVE CRACK-GROWTH THRESHOLD INPUT - NOT DESIGN ALLOWABLE",
+)
+
+result = cycles_to_fracture_with_threshold(
+    1.0e-3, cycle, panel, law, toughness, threshold
+)
+print(result.state)                   # GrowthState.ACTIVE_GROWTH
+print(result.threshold_ratio)         # 1.401594  (>1 means growing)
+print(result.threshold_crack_length)  # 0.0005092306461735948 m
+print(result.predicted_cycles)        # 842070.5528  -- identical to Milestone 3
+
+# A smaller flaw is arrested outright:
+arrested = cycles_to_fracture_with_threshold(
+    0.25e-3, cycle, panel, law, toughness, threshold
+)
+print(arrested.state)              # GrowthState.ARRESTED_BELOW_THRESHOLD
+print(arrested.predicted_cycles)   # inf
+
+# Pass threshold=None to disable the screen and reproduce Milestone 3.
 ```
 
 ## License

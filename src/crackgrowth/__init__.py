@@ -15,6 +15,11 @@ boundary (no closed form survives ``Y(a)``), and a geometry-aware log-grid
 integrator. Throughout, ``a`` is the HALF crack length and the total crack
 length is ``2a``.
 
+Milestone 4: a constant-amplitude crack-growth threshold ``delta_K_th`` applied
+as a HARD CUTOFF, distinguishing a crack that is actively growing from one that
+is arrested below threshold or already at the fracture boundary. The
+no-threshold Paris path remains available and unchanged.
+
 All quantities are SI internally:
 
 ===============================  ==========================================
@@ -34,10 +39,39 @@ from .canonical import (
     CANONICAL_FINITE_WIDTH_GEOMETRY,
     CANONICAL_FRACTURE_TOUGHNESS,
     CANONICAL_GEOMETRY,
+    CANONICAL_GROWTH_THRESHOLD,
     CANONICAL_INITIAL_CRACK_LENGTH,
     CANONICAL_PARIS_LAW,
     CANONICAL_PLATE_WIDTH,
     CANONICAL_TARGET_CRACK_LENGTH,
+)
+from .threshold import (
+    ILLUSTRATIVE_ALUMINIUM_LIKE_THRESHOLD,
+    ILLUSTRATIVE_THRESHOLD_DISCLAIMER,
+    CrackGrowthThreshold,
+    FiniteWidthThresholdResult,
+    ThresholdBoundaryStatus,
+    ThresholdedGrowthPoint,
+    finite_width_threshold_crack_length,
+    threshold_crack_length_constant_y,
+    thresholded_crack_growth_rate,
+)
+from .threshold_life import (
+    BoundaryOrdering,
+    GrowthState,
+    ThresholdedLifeResult,
+    classify_growth_state,
+    compare_threshold_and_fracture_boundaries,
+    cycles_to_fracture_with_threshold,
+)
+from .threshold_sensitivity import (
+    ThresholdPoint,
+    initial_crack_sensitivity_with_threshold,
+    max_stress_sensitivity_with_threshold,
+    stress_range_sensitivity_with_threshold,
+    threshold_sensitivity,
+    toughness_sensitivity_with_threshold,
+    width_sensitivity_with_threshold,
 )
 from .finite_width import (
     CrackGeometry,
@@ -145,7 +179,7 @@ from .sensitivity import (
 )
 from .stress_intensity import delta_stress_intensity, stress_intensity
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "__version__",
@@ -253,4 +287,30 @@ __all__ = [
     "finite_width_stress_range_sensitivity",
     "toughness_sensitivity_finite_width",
     "geometry_amplification_table",
+    # crack-growth threshold (Milestone 4)
+    "CrackGrowthThreshold",
+    "CANONICAL_GROWTH_THRESHOLD",
+    "ILLUSTRATIVE_THRESHOLD_DISCLAIMER",
+    "ILLUSTRATIVE_ALUMINIUM_LIKE_THRESHOLD",
+    "ThresholdedGrowthPoint",
+    "ThresholdBoundaryStatus",
+    "FiniteWidthThresholdResult",
+    "thresholded_crack_growth_rate",
+    "threshold_crack_length_constant_y",
+    "finite_width_threshold_crack_length",
+    # threshold-aware life (Milestone 4)
+    "GrowthState",
+    "BoundaryOrdering",
+    "ThresholdedLifeResult",
+    "classify_growth_state",
+    "compare_threshold_and_fracture_boundaries",
+    "cycles_to_fracture_with_threshold",
+    # threshold sensitivity (Milestone 4)
+    "ThresholdPoint",
+    "threshold_sensitivity",
+    "initial_crack_sensitivity_with_threshold",
+    "stress_range_sensitivity_with_threshold",
+    "max_stress_sensitivity_with_threshold",
+    "width_sensitivity_with_threshold",
+    "toughness_sensitivity_with_threshold",
 ]

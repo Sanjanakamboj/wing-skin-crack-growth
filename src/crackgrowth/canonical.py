@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from .finite_width import FiniteWidthCenterCrack
 from .fracture import ILLUSTRATIVE_ALUMINIUM_LIKE_TOUGHNESS
+from .threshold import ILLUSTRATIVE_ALUMINIUM_LIKE_THRESHOLD
 from .geometry import INFINITE_PLATE_THROUGH_CRACK
 from .loading import StressCycle
 from .paris import ILLUSTRATIVE_ALUMINIUM_LIKE_PARIS
@@ -37,6 +38,7 @@ __all__ = [
     "CANONICAL_FRACTURE_TOUGHNESS",
     "CANONICAL_PLATE_WIDTH",
     "CANONICAL_FINITE_WIDTH_GEOMETRY",
+    "CANONICAL_GROWTH_THRESHOLD",
 ]
 
 CANONICAL_GEOMETRY = INFINITE_PLATE_THROUGH_CRACK
@@ -71,3 +73,12 @@ CANONICAL_PLATE_WIDTH = 100.0e-3
 CANONICAL_FINITE_WIDTH_GEOMETRY = FiniteWidthCenterCrack(
     plate_width=CANONICAL_PLATE_WIDTH
 )
+
+#: Canonical illustrative crack-growth threshold (Milestone 4).
+#:
+#: Chosen after auditing delta_K_th = 2, 3, 4, 5, 6, 8, 10 MPa*sqrt(m) against
+#: the canonical finite-width case, where delta_K(a0) = 5.6064 MPa*sqrt(m):
+#: values up to 5 leave the initial crack active, 6 and above arrest it.
+#: 4 MPa*sqrt(m) gives a threshold ratio of 1.40 at a0 and a threshold crack
+#: size of 0.51 mm, so a genuine active-growth interval exists.
+CANONICAL_GROWTH_THRESHOLD = ILLUSTRATIVE_ALUMINIUM_LIKE_THRESHOLD
