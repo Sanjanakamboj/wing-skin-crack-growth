@@ -19,6 +19,12 @@ The engineering question Milestone 2 answers:
 > intensity up to the material's fracture toughness, and how many cycles remain
 > from the initial flaw to that boundary?
 
+The engineering question Milestone 3 answers:
+
+> How much does finite panel width amplify stress intensity, reduce the
+> toughness-derived critical crack size, and shorten Paris-law life relative to
+> the infinite-plate `Y = 1` reference?
+
 ## Scope (Milestone 1)
 
 Implemented:
@@ -49,6 +55,21 @@ Added, without altering any Milestone 1 mechanics:
 
 Milestone 1's imposed 10 mm endpoint is retained unchanged for regression; it is
 superseded, not replaced.
+
+## Scope (Milestone 3)
+
+Added, without altering any Milestone 1 or 2 mechanics:
+
+- a finite-width centre-cracked panel geometry with a crack-size-dependent
+  geometry factor `Y(a)`
+- a geometry protocol so constant-`Y` and `Y(a)` models share one interface
+- finite-width `K`, `ΔK`, residual strength and fracture assessment
+- a bounded bisection solver for the critical crack size, since no closed form
+  survives `Y(a)`
+- a geometry-aware log-grid integrator, added alongside — not replacing — the
+  Milestone 1 linear-grid integrator
+- width, initial-flaw, stress and toughness sensitivity sweeps, a geometry
+  amplification table, and ligament diagnostics
 
 Not implemented — see [Limitations](#limitations).
 
@@ -128,7 +149,63 @@ guarded against by explicit tests. For constant `Y` the two are related by
 so at the critical crack size `ΔK(a_c) = (Δσ / σ_max) · K_IC` — for the
 canonical cycle, exactly `5/6 · K_IC = 25 MPa·√m`, **not** `K_IC`.
 
-## Geometry convention
+## Finite-width crack convention (Milestone 3)
+
+Throughout this package **`a` is the HALF crack length**. A centre crack in a
+panel of width `W` therefore has:
+
+| Quantity | Expression |
+| --- | --- |
+| Total (tip-to-tip) crack length | `2a` |
+| Remaining total ligament | `W − 2a` |
+| Ligament fraction | `1 − 2a/W` |
+| Admissible range | `0 < 2a < W`, i.e. `0 < a < W/2` |
+
+This is the same meaning `a` carries in Milestones 1 and 2 — `Y = 1` is the
+*infinite-plate* centre crack of total length `2a` — so nothing about the
+interpretation of `a` changes. Silently switching between `a` and `2a` is one of
+the easiest and most damaging errors in this subject, so the convention is
+stated at every boundary and locked by dedicated tests. A 20 mm *half* crack
+fills 40 % of a 100 mm panel, not 20 %.
+
+The bound `a < W/2` is **enforced, not clamped**: beyond it no ligament remains
+and the correction is meaningless.
+
+## Centre-crack geometry factor
+
+The standard secant finite-width correction:
+
+```
+Y(a, W) = sqrt( sec( π · a / W ) ) = 1 / sqrt( cos( π · a / W ) )
+```
+
+| `a/W` | `Y` |
+| --- | --- |
+| 0.01 | 1.000247 |
+| 0.05 | 1.006213 |
+| 0.10 | 1.025408 |
+| 0.20 | 1.111786 |
+| 0.30 | 1.304340 |
+| 0.40 | 1.798907 |
+| 0.45 | 2.528330 |
+| 0.49 | 5.642360 |
+
+Behaviour, all verified by test: `Y → 1` as `a/W → 0`; `Y > 1` for any finite
+non-zero `a/W`; `Y` increases monotonically with `a/W`; and `Y → ∞` as
+`a → W/2`. No other empirical correction factor is applied.
+
+Both geometries then use the *same* stress-intensity equation:
+
+```
+K = Y(a) · σ · sqrt(π · a)        ΔK = Y(a) · Δσ · sqrt(π · a)
+```
+
+`K` remains signed, so compression stays negative, and `ΔK` remains the
+algebraic range — still no crack closure. Because `Y(a) ≥ 1`, the finite-width
+`ΔK` is never below the infinite-plate value at the same crack length, and
+approaches it as `W → ∞`.
+
+## Geometry convention (Milestones 1–2)
 
 Milestone 1 supports one deliberately simple geometry: `ThroughCrackGeometry`,
 an idealized through crack characterised by a single constant dimensionless
@@ -305,6 +382,111 @@ no thickness or state-of-stress validity check.
 traceable to a qualification dataset, and must not be used as a design
 allowable.
 
+## Finite-width fracture boundary and residual strength
+
+With `Y = Y(a)` the Milestone 2 closed form `a_c = (1/π)·(K_IC/(Y·σ_max))²` is
+**no longer valid** and is never used for a finite-width panel. The condition
+
+```
+K_max(a_c) = Y(a_c) · σ_max · sqrt(π · a_c) = K_IC
+```
+
+is implicit and is solved numerically by **bounded bisection** on
+`f(a) = K_max(a) − K_IC`. Bisection is chosen for transparency: deterministic,
+derivative-free, and incapable of leaving its bracket. `f` is monotonically
+increasing on the admissible interval, so the root is unique.
+
+- The bracket is **never widened silently**. A failed sign condition returns an
+  explicit `CriticalCrackStatus`, not a number.
+- The upper bracket sits at `(W/2)·(1 − 10⁻¹²)`, so **`a = W/2` is never
+  evaluated** — the point at which `Y` diverges.
+- The tolerance is an exposed parameter (default `10⁻¹² m`), not a hidden one.
+- Statuses distinguish a found root, a non-opening cycle (`σ_max ≤ 0`, giving no
+  tensile boundary and `a_c = ∞`), a lower bound already beyond critical, and no
+  root in the bracket.
+
+Residual strength inverts the same equation:
+
+```
+σ_residual(a) = K_IC / ( sqrt(π · a) · Y(a) )
+```
+
+Verified to fall monotonically with `a`, to lie **below** the infinite-plate
+value at the same crack length, to approach zero as `a → W/2`, and to return
+`σ_max` exactly at `a_c` — across a sweep of widths and stresses.
+
+**The identity `ΔK(a_c)/K_IC = Δσ/σ_max` survives `Y(a)` exactly**, because
+`Y(a_c)` multiplies both `ΔK` and `K_max` and cancels in the ratio. For the
+canonical cycle it is still exactly `5/6`, giving `ΔK(a_c) = 25 MPa·√m`. This is
+a strong cross-check that fracture uses `K_max` and growth uses `ΔK`.
+
+Ligament quantities (`2a`, `W − 2a`, `1 − 2a/W`) are reported alongside the
+fracture margin but are kept **strictly separate** from it: they are geometric
+diagnostics, never blended into the margin and never used as a pass/fail
+criterion. `passes` depends on `K_max ≤ K_IC` alone.
+
+## Geometry-aware log-grid integration
+
+The Milestone 1 uniform-`a` Simpson integrator is a verified baseline and is
+**not modified, replaced, or re-defaulted**. Milestone 3 adds a second
+integrator better suited to wide spans and to `Y(a)`.
+
+With `u = ln(a)`, `a = exp(u)`, `da = a du`:
+
+```
+N = ∫[a₀→a_f] da / (da/dN) = ∫[ln a₀ → ln a_f] a / (da/dN) du
+```
+
+A uniform grid in `u` is geometrically spaced in `a`, placing points where the
+integrand actually varies. At every abscissa the full chain is evaluated:
+
+```
+a → Y(a) → ΔK(a) → da/dN(a) → a/(da/dN)
+```
+
+so **`Y` is re-evaluated at every point and never factored out of the integral**.
+The same guarantees as Milestone 1 apply: fixed grid, even interval count
+required (odd rejected, not adjusted), no adaptive tolerance, deterministic,
+never leaves `[a₀, a_f]`, zero stress range returns `math.inf`, and no SciPy.
+
+### Measured integrator comparison
+
+Relative error against the constant-`Y` closed form, at equal interval count:
+
+| `n` | moderate span (`a_f/a₀ = 10`) | | wide span (`a_f/a₀ = 1000`) | |
+| --- | --- | --- | --- | --- |
+| | linear grid | log grid | linear grid | log grid |
+| 10 | 1.3 × 10⁻² | 9.7 × 10⁻⁷ | 1.6 × 10¹ | 7.8 × 10⁻⁵ |
+| 50 | 5.1 × 10⁻⁵ | 1.6 × 10⁻⁹ | 2.7 × 10⁰ | 1.3 × 10⁻⁷ |
+| 200 | 2.2 × 10⁻⁷ | 6.1 × 10⁻¹² | 4.0 × 10⁻¹ | 4.9 × 10⁻¹⁰ |
+| 1000 | 3.5 × 10⁻¹⁰ | 9.1 × 10⁻¹⁵ | 1.2 × 10⁻² | 7.9 × 10⁻¹³ |
+
+The log grid was **measured** to win at every interval count in this study, by
+roughly ten orders of magnitude at wide span. Both converge; the linear grid is
+correct, just inefficient when `a_f/a₀` is large. This is a measurement of these
+cases, not a claim that a log grid must always win.
+
+## Numerical convergence (finite width)
+
+Canonical finite-width case, log-grid Simpson, against an `n = 100 000`
+reference:
+
+| `n` | Life [cycles] | Relative vs finest |
+| --- | --- | --- |
+| 50 | 842 070.554322 | 1.79 × 10⁻⁹ |
+| 100 | 842 070.552907 | 1.13 × 10⁻¹⁰ |
+| 200 | 842 070.552818 | 7.05 × 10⁻¹² |
+| 500 | 842 070.552812 | 1.73 × 10⁻¹³ |
+| 1000 | 842 070.552812 | 4.70 × 10⁻¹⁵ |
+| 2000 | 842 070.552812 | 7.33 × 10⁻¹⁵ |
+| 4000 | 842 070.552812 | 8.43 × 10⁻¹⁵ |
+
+The **measured** error ratio is 15.90, 15.99 and 16.26 per interval doubling
+over `n = 50 → 400` — fourth order, as expected for Simpson, and confirmed to
+hold with a crack-size-dependent `Y`. Beyond `n ≈ 1000` the result sits at the
+floating-point floor, so no order can be claimed there. The case is already
+accurate to 2 × 10⁻⁹ at just 50 intervals.
+
 ## Analytical reference
 
 For constant `Y` and constant `Δσ`, `da/dN = C·(Y·Δσ·√π)^m · a^(m/2)`, so
@@ -386,6 +568,17 @@ Milestone 2 adds a fifth leg:
    `ΔK(a_c)/K_IC = Δσ/σ_max` across several cycles and geometry factors.
    Milestone 1's canonical numbers, public API, conventions and sensitivity
    results are additionally locked by a dedicated regression module.
+
+Milestone 3 adds a sixth leg:
+
+6. **Limit and convention checks.** The finite-width model must reduce to the
+   constant-`Y` model as `W → ∞` (verified for the geometry factor, `ΔK`, the
+   critical size and the life, at tightening tolerances); the half-crack
+   convention is locked so `a` is never confused with `2a`; the solver is shown
+   to be deterministic, bracket-safe and never to evaluate at `W/2`; and
+   freezing `Y` at `Y(a₀)` is shown to change the answer, proving `Y(a)` is
+   re-evaluated throughout the integration. A second regression module locks the
+   Milestone 2 fracture results.
 
 ### A note on quadrature span
 
@@ -555,6 +748,152 @@ dominates the answer far more strongly than the toughness does — a 3× range i
 `K_IC` moves the life by ~34 %, while a 16× range in `a₀` moves it by ~84 %.
 Utilization follows `sqrt(a₀/a_c)` exactly for constant `Y`.
 
+## Representative result — Milestone 3 (finite width)
+
+Same cycle, Paris curve and toughness; centre-cracked panel of `W = 100 mm`,
+`a₀ = 1 mm` (half crack length, so total crack `2a₀ = 2 mm`).
+
+The width was chosen after auditing `W = 40, 50, 75, 100, 150, 200, 500 mm`.
+At 100 mm the initial flaw is safely small (`a₀/W = 0.01`, `Y(a₀) = 1.00025`),
+the critical crack sits at 17.09 mm with a total crack length of only 34 % of
+the panel width, and the finite-width effect is noticeable but not pathological.
+Narrower panels give a more dramatic penalty but push the total crack past half
+the width, where the unmodelled net-section behaviour would realistically govern.
+
+| Fracture boundary | Value |
+| --- | --- |
+| Solver | bounded bisection, 36 iterations, tol 10⁻¹² m |
+| Critical half crack `a_c` | 17.0940 mm |
+| Total crack `2a_c` | 34.1879 mm |
+| `Y(a₀)` | 1.000247 |
+| `Y(a_c)` | 1.078807 |
+| `K_max(a_c)` | 30.0000 MPa·√m (`= K_IC`) |
+| `ΔK(a_c)` | 25.0000 MPa·√m (`= 5/6 · K_IC`) |
+| Residual ligament | 65.8121 mm |
+| Ligament fraction | 0.658121 (diagnostic only) |
+| `σ_residual(a_c)` | 120.00 MPa (`= σ_max`) |
+
+| Life | Value |
+| --- | --- |
+| Finite-width life (log grid, 1000 intervals) | 842 070.5528 cycles |
+| Infinite-plate life (Milestone 2) | 881 160.7798 cycles |
+| **Life reduction** | **4.44 %** |
+| **Critical-size reduction** | **14.08 %** |
+| `da/dN(a₀)` | 1.7622 × 10⁻⁹ m/cycle |
+| `da/dN(a_c)` | 1.5625 × 10⁻⁷ m/cycle |
+
+The critical size moves three times as much as the life does. Most of the life
+is spent while the crack is small and `Y` is still close to 1, so finite width
+costs far less life than its effect on the fracture boundary suggests.
+
+**Frozen-`Y` diagnostic.** Holding `Y` at `Y(a₀)` for the whole integration
+gives 860 455 cycles — a **2.18 % overestimate**, growing for narrower panels.
+Freezing `Y` ignores exactly the amplification that builds up as the crack
+grows. It is reported only to quantify that error and is never used as a result.
+
+## Width sensitivity
+
+`a₀ = 1 mm` and the cycle fixed.
+
+| `W` [mm] | `Y(a₀)` | `a_c` [mm] | `2a_c/W` | Ligament fraction | Life [cycles] |
+| --- | --- | --- | --- | --- | --- |
+| 40 | 1.001545 | 11.8644 | 0.5932 | 0.4068 | 741 596 |
+| 50 | 1.000988 | 13.3222 | 0.5329 | 0.4671 | 774 554 |
+| 75 | 1.000439 | 15.7299 | 0.4195 | 0.5805 | 820 029 |
+| **100** | **1.000247** | **17.0940** | **0.3419** | **0.6581** | **842 071** |
+| 150 | 1.000110 | 18.4305 | 0.2457 | 0.7543 | 861 641 |
+| 200 | 1.000062 | 19.0136 | 0.1901 | 0.8099 | 869 637 |
+| 500 | 1.000010 | 19.7415 | 0.0790 | 0.9210 | 879 206 |
+| ∞ (M2) | 1.000000 | 19.8944 | — | — | 881 161 |
+
+Monotonic and convergent, as verified by test: wider panels give a lower `Y`, a
+larger critical crack, a longer life and a larger ligament fraction, approaching
+the infinite-plate reference from below.
+
+## Initial-crack sensitivity (finite width)
+
+`W = 100 mm`, cycle fixed.
+
+| `a₀` [mm] | `a₀/W` | `Y(a₀)` | Utilization | Life [cycles] |
+| --- | --- | --- | --- | --- |
+| 0.25 | 0.0025 | 1.000015 | 0.1121 | 1 977 634 |
+| 0.50 | 0.0050 | 1.000062 | 0.1585 | 1 312 357 |
+| 1.00 | 0.0100 | 1.000247 | 0.2243 | 842 071 |
+| 2.00 | 0.0200 | 1.000988 | 0.3174 | 509 912 |
+| 4.00 | 0.0400 | 1.003966 | 0.4502 | 276 125 |
+| 8.00 | 0.0800 | 1.016089 | 0.6443 | 113 856 |
+
+A 32× larger initial flaw costs 94 % of the life. The assumed initial flaw size
+remains the single most influential input in the whole model.
+
+## Maximum-stress sensitivity at fixed `Δσ` (finite width)
+
+`Δσ` held at 100 MPa, so `R` varies and the Paris driving force does not.
+
+| `σ_max` [MPa] | `R` | `ΔK(a₀)` [MPa·√m] | `da/dN(a₀)` [m/cycle] | `a_c` [mm] | Life [cycles] |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 0.0000 | 5.6064 | 1.7622 × 10⁻⁹ | 22.0467 | 866 399 |
+| 120 | 0.1667 | 5.6064 | 1.7622 × 10⁻⁹ | 17.0940 | 842 071 |
+| 140 | 0.2857 | 5.6064 | 1.7622 × 10⁻⁹ | 13.3496 | 811 768 |
+| 160 | 0.3750 | 5.6064 | 1.7622 × 10⁻⁹ | 10.5783 | 777 323 |
+| 180 | 0.4444 | 5.6064 | 1.7622 × 10⁻⁹ | 8.5266 | 740 185 |
+
+`ΔK(a₀)` and `da/dN(a₀)` are identical down the column — the `K_max`/`ΔK`
+separation demonstrated in Milestone 2 survives a crack-size-dependent `Y`. The
+life falls purely because the fracture boundary moves inward.
+
+## Stress-range sensitivity at fixed `σ_min` (finite width)
+
+Deliberately distinct: `σ_min` held at 20 MPa, so **both** driving forces move.
+
+| `σ_max` [MPa] | `Δσ` [MPa] | `ΔK(a₀)` [MPa·√m] | `a_c` [mm] | Life [cycles] |
+| --- | --- | --- | --- | --- |
+| 80 | 60 | 3.3638 | 28.2552 | 4 088 856 |
+| 100 | 80 | 4.4851 | 22.0467 | 1 692 185 |
+| 120 | 100 | 5.6064 | 17.0940 | 842 071 |
+| 140 | 120 | 6.7276 | 13.3496 | 469 773 |
+| 160 | 140 | 7.8489 | 10.5783 | 283 281 |
+| 180 | 160 | 8.9702 | 8.5266 | 180 709 |
+
+## Toughness sensitivity (finite width) — the broken `K_IC²` law
+
+| `K_IC` [MPa·√m] | `a_c` [mm] | `Y(a_c)` | Ligament fraction | Life [cycles] | `a_c/K_IC²` (normalised) |
+| --- | --- | --- | --- | --- | --- |
+| 20 | 8.5266 | 1.0183 | 0.8295 | 740 185 | 1.0000 |
+| 25 | 12.7260 | 1.0419 | 0.7455 | 805 157 | 0.9552 |
+| 30 | 17.0940 | 1.0788 | 0.6581 | 842 071 | 0.8910 |
+| 35 | 21.2599 | 1.1286 | 0.5748 | 863 358 | 0.8142 |
+| 40 | 25.0049 | 1.1893 | 0.4999 | 875 792 | 0.7331 |
+| 50 | 31.0254 | 1.3346 | 0.3795 | 887 704 | 0.5822 |
+| 60 | 35.3486 | 1.5004 | 0.2930 | 892 339 | 0.4606 |
+
+**This is the key Milestone 3 finding.** For the infinite plate, `a_c ∝ K_IC²`
+holds *exactly* — the last column would read 1.0000 throughout, and a test
+asserts precisely that for the Milestone 2 model. For a finite-width panel it
+does **not**: the column falls to 0.46, because a larger `a_c` sits at a higher
+`Y(a_c)`, which eats into the toughness benefit. Tripling `K_IC` from 20 to
+60 MPa·√m would enlarge `a_c` ninefold in an infinite plate; here it enlarges it
+only 4.1-fold. Extra toughness buys progressively less crack length, and the
+ligament fraction falls to 0.29, where the unmodelled net-section behaviour
+would realistically start to govern.
+
+## Geometry amplification at `W = 100 mm`
+
+| `a` [mm] | `a/W` | `2a` [mm] | Ligament fraction | `Y(a)` | `K_max` [MPa·√m] | `ΔK` [MPa·√m] |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.5 | 0.005 | 1.0 | 0.990 | 1.0001 | 4.7563 | 3.9636 |
+| 1 | 0.010 | 2.0 | 0.980 | 1.0002 | 6.7276 | 5.6064 |
+| 2 | 0.020 | 4.0 | 0.960 | 1.0010 | 9.5214 | 7.9345 |
+| 5 | 0.050 | 10.0 | 0.900 | 1.0062 | 15.1332 | 12.6110 |
+| 10 | 0.100 | 20.0 | 0.800 | 1.0254 | 21.8099 | 18.1749 |
+| 15 | 0.150 | 30.0 | 0.700 | 1.0594 | 27.5970 | 22.9975 |
+| 20 | 0.200 | 40.0 | 0.600 | 1.1118 | 33.4420 | 27.8683 |
+| 30 | 0.300 | 60.0 | 0.400 | 1.3043 | 48.0426 | 40.0355 |
+| 40 | 0.400 | 80.0 | 0.200 | 1.7989 | 76.5085 | 63.7571 |
+
+`Y` is within 0.3 % of unity below `a/W ≈ 0.03` and climbs steeply past
+`a/W ≈ 0.3`.
+
 ## Milestone 1 stress-range sensitivity (imposed endpoint)
 
 Both `σ_max` and `σ_min` are scaled, preserving `R` and varying only `Δσ`.
@@ -592,10 +931,25 @@ This model is a teaching-grade idealization. It is **not** a certification
 method and its output is **not** an inspection or safe-life interval.
 
 > **The toughness-derived critical crack size is an LEFM screening boundary, not
-> a certified residual-strength allowable.**
+> a certified residual-strength allowable. The finite-width critical crack
+> length remains an LEFM screening boundary, not a certified residual-strength
+> allowable.**
 
 - **LEFM only** — small-scale yielding assumed throughout.
-- **Constant geometry factor** — no finite-width correction, no `Y(a)`.
+- **Centre crack only** — no edge crack, no fastener-hole crack, no corner or
+  surface flaw, and no multiple-site damage or crack interaction.
+- **The finite-width correction is still idealized LEFM.** The secant formula is
+  a standard closed-form idealization for an isolated centre crack in a plain
+  panel; it models no stiffener interaction, no load redistribution into
+  surrounding structure, no crack-front curvature or tunnelling, and no
+  thickness or state-of-stress correction.
+- **Ligament fraction is diagnostic only** — reported for interpretation, never
+  used as a criterion and never blended into the fracture margin. There is no
+  net-section-collapse model, so for a short ligament this screen will still
+  report a fracture boundary where collapse would realistically govern first.
+- **Milestones 1–2 use a constant geometry factor** with no finite-width
+  correction; that constant-`Y` model is retained deliberately as the
+  infinite-plate reference and regression baseline.
 - **Constant-amplitude loading only.**
 - **No crack closure** — a compressive `σ_min` contributes in full to `Δσ`.
 - **No `ΔK` threshold** — every non-zero range produces some growth.
@@ -682,6 +1036,12 @@ Run the Milestone 2 study (toughness-derived critical crack size):
 python examples/critical_crack_growth.py
 ```
 
+Run the Milestone 3 study (finite-width panel):
+
+```bash
+python examples/finite_width_crack_growth.py
+```
+
 ## Minimal usage
 
 ```python
@@ -719,6 +1079,20 @@ result = cycles_to_critical_crack(1.0e-3, cycle, geometry, law, toughness)
 print(result.critical_crack_length)   # 0.019894367886486918 m
 print(result.admissibility)           # FlawAdmissibility.BELOW_CRITICAL
 print(result.predicted_cycles)        # 881160.7850
+```
+
+Accounting for finite panel width (`a` is the HALF crack length):
+
+```python
+from crackgrowth import FiniteWidthCenterCrack, cycles_to_finite_width_fracture
+
+panel = FiniteWidthCenterCrack(plate_width=100.0e-3)     # W = 100 mm
+
+result = cycles_to_finite_width_fracture(1.0e-3, cycle, panel, law, toughness)
+print(result.critical_crack_length)          # 0.017093952819407475 m
+print(result.critical.geometry_factor_at_critical)   # 1.078807
+print(result.ligament_fraction_at_critical)  # 0.658121  (diagnostic only)
+print(result.predicted_cycles)               # 842070.5528
 ```
 
 ## License

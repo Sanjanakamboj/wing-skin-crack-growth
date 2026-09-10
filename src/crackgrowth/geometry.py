@@ -51,6 +51,17 @@ class ThroughCrackGeometry:
             require_positive(self.geometry_factor, "geometry_factor"),
         )
 
+    def geometry_factor_at(self, crack_length: float) -> float:
+        """The geometry factor at a given crack length [-].
+
+        Added in Milestone 3 so that constant-Y and crack-size-dependent
+        geometries share one interface (:class:`crackgrowth.finite_width.CrackGeometry`).
+        For this class the factor is constant, so ``crack_length`` is validated
+        and then ignored -- the returned value is always ``geometry_factor``.
+        """
+        require_positive(crack_length, "crack_length")
+        return self.geometry_factor
+
 
 INFINITE_PLATE_THROUGH_CRACK = ThroughCrackGeometry(
     geometry_factor=1.0,

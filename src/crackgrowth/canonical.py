@@ -22,6 +22,7 @@ from toughness instead; the two are deliberately different.
 
 from __future__ import annotations
 
+from .finite_width import FiniteWidthCenterCrack
 from .fracture import ILLUSTRATIVE_ALUMINIUM_LIKE_TOUGHNESS
 from .geometry import INFINITE_PLATE_THROUGH_CRACK
 from .loading import StressCycle
@@ -34,6 +35,8 @@ __all__ = [
     "CANONICAL_INITIAL_CRACK_LENGTH",
     "CANONICAL_TARGET_CRACK_LENGTH",
     "CANONICAL_FRACTURE_TOUGHNESS",
+    "CANONICAL_PLATE_WIDTH",
+    "CANONICAL_FINITE_WIDTH_GEOMETRY",
 ]
 
 CANONICAL_GEOMETRY = INFINITE_PLATE_THROUGH_CRACK
@@ -50,3 +53,21 @@ CANONICAL_TARGET_CRACK_LENGTH = 10.0e-3
 
 #: Canonical illustrative mode-I fracture toughness (Milestone 2).
 CANONICAL_FRACTURE_TOUGHNESS = ILLUSTRATIVE_ALUMINIUM_LIKE_TOUGHNESS
+
+#: Canonical panel width [m] (Milestone 3).
+#:
+#: Chosen after auditing W = 40, 50, 75, 100, 150, 200 and 500 mm against the
+#: canonical cycle and flaw. At W = 100 mm the initial flaw is safely small
+#: (a0/W = 0.01, Y(a0) = 1.00025), the critical crack sits at 17.09 mm with a
+#: total crack length of only 34 % of the panel width, and the finite-width
+#: effect is noticeable but not pathological: 14 % smaller critical crack and
+#: 4.4 % less life than the infinite plate. Narrower panels give a more
+#: dramatic penalty but push the total crack past half the width, where the
+#: unmodelled net-section behaviour would realistically govern.
+CANONICAL_PLATE_WIDTH = 100.0e-3
+
+#: Canonical finite-width centre-cracked panel (Milestone 3).
+#: ``a`` is the HALF crack length throughout.
+CANONICAL_FINITE_WIDTH_GEOMETRY = FiniteWidthCenterCrack(
+    plate_width=CANONICAL_PLATE_WIDTH
+)
