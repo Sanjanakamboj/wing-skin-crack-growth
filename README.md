@@ -31,6 +31,13 @@ The engineering question Milestone 4 answers:
 > grow at all, and if so, how many cycles remain before the finite-width
 > toughness boundary is reached?
 
+The engineering question Milestone 5 answers:
+
+> For a repeating wing-skin load spectrum containing many low-amplitude cycles
+> and a smaller number of severe cycles, how does the crack evolve sequentially,
+> which load blocks actually drive growth, and after how many total cycles does
+> the crack reach a fracture boundary?
+
 ## Scope (Milestone 1)
 
 Implemented:
@@ -89,6 +96,19 @@ Added, without altering any Milestone 1–3 mechanics:
 - exact (constant-`Y`) and numerically solved (finite-width) threshold crack size
 - a diagnostic comparison of the threshold and fracture boundaries
 - threshold, initial-flaw, stress, width and toughness sensitivity sweeps
+
+## Scope (Milestone 5)
+
+Added, without altering any Milestone 1–4 mechanics:
+
+- an ordered variable-amplitude block spectrum (`SpectrumBlock`, `LoadSpectrum`)
+- block advancement by **inverting** the verified life integral, not by an
+  explicit `a + n·(da/dN)` step
+- per-block threshold verdicts and per-block fracture boundaries
+- repeated-spectrum simulation with explicit end statuses
+- fracture located partway through a block, in actual cycles
+- growth-contribution accounting by block
+- a sequence-order study and spectrum sensitivity sweeps
 
 Not implemented — see [Limitations](#limitations).
 
@@ -599,6 +619,84 @@ amplitude, and the model does not invent growth to bridge the gap.
 
 `ΔK_th / K_IC` is reported as a **diagnostic only**, never as a criterion.
 
+## Variable-amplitude block spectrum (Milestone 5)
+
+A `LoadSpectrum` is an **ordered** tuple of `SpectrumBlock`, each holding a
+verified `StressCycle` and a positive integer cycle count. The order is
+preserved exactly as supplied: never sorted, never ranked by severity, never
+merged. Order matters because the crack length evolves as the spectrum is worked
+through — the same block applied at a larger crack sees a larger `Y(a)`, a
+larger `ΔK`, a different threshold verdict and a nearer fracture boundary.
+
+### Why Miner's rule is not used
+
+**No cumulative-damage sum `D = Σ nᵢ/Nᵢ` is formed anywhere in this package**, and
+no life is derived from one. A damage sum discards exactly the state that governs
+the answer: after every block the crack length has changed, and with it `Y(a)`,
+`ΔK(a)`, the threshold state and the block-specific fracture boundary. Milestone
+5 integrates the sequential Paris process directly instead.
+
+The canonical result shows why this matters concretely: the low-amplitude block
+runs **100× more cycles** than the severe block but produces only **4.6×** the
+crack extension. A cycle-weighted damage sum would badly misrank the blocks.
+
+### Block advancement
+
+The crude update `a_end = a_start + n·(da/dN at a_start)` freezes the growth rate
+across a block and is **not used**. Instead each block advance *inverts* the
+already-verified life integral: the end crack length solves
+
+```
+F(a_end) = N(a_start → a_end) − n_block = 0
+```
+
+where `N` is the unchanged Milestone 3 geometry-aware log-grid integration.
+`N` is strictly increasing in `a_end`, so the root is unique and a bounded
+bisection finds it deterministically, with no explicit time-step error.
+
+The bracket is seeded with a **rigorous** lower bound: because `da/dN` increases
+with `a`, an explicit Euler step under-predicts the growth, so
+`a_start + n·(da/dN at a_start)` can never overshoot `a_end`. The upper end is
+found by doubling that step. Every trial point stays inside `[a_start, a_c]` —
+the bracket is refined, never widened past the admissible interval, and the
+fallback is the full original bracket.
+
+Within an active block the integrator applies **no** threshold, and that is
+correct rather than convenient: `ΔK` increases monotonically with `a`, so a
+block active at `a_start` stays active for every larger crack in the block. The
+threshold cannot re-bind mid-block.
+
+### Per-block boundaries
+
+Every block has its **own** `σ_max` and therefore its **own** fracture boundary
+`a_c,i`, and its own `Δσ` and therefore its own threshold size `a_th,i`. Neither
+is computed once for the spectrum from an average stress — a cycle-weighted mean
+`σ_max` of the canonical spectrum is 74.3 MPa, which matches no block and gives a
+boundary more than twice the governing one.
+
+`minimum_block_critical_crack_length` is available as a **diagnostic envelope**
+only. The simulation never terminates because the crack passed it: fracture is
+checked in sequence against the block actually being applied. A crack may
+legitimately exceed a severe block's `a_c` while milder blocks are running.
+
+### Statuses and life accounting
+
+`SpectrumStatus` is explicit: `FRACTURE_REACHED`, `SPECTRUM_ARRESTED`,
+`MAX_REPEATS_REACHED`, `INITIAL_FLAW_ALREADY_CRITICAL`,
+`NO_TENSILE_FRACTURE_BOUNDARY`. No engineering outcome is returned as `None`.
+
+Life is reported in **actual stress cycles**; a spectrum repeat is a secondary
+diagnostic. When fracture happens inside a block the total is the cycles of all
+previously completed blocks plus the cycles completed inside the fracture block,
+never rounded up to a whole block or spectrum. The fracture cycle position stays
+a **float**, because the integrated Paris prediction is a continuum estimate.
+
+An arrested block still **consumes** its cycles — they occur, they simply produce
+no growth. A full pass that leaves the crack exactly where it started proves the
+spectrum is arrested, so `SPECTRUM_ARRESTED` is returned after one unchanged
+repeat rather than looping to the guard. `max_spectrum_repeats` is a numerical
+safety guard, not a physical life prediction.
+
 ## Analytical reference
 
 For constant `Y` and constant `Δσ`, `da/dN = C·(Y·Δσ·√π)^m · a^(m/2)`, so
@@ -707,6 +805,35 @@ Boundary tests near `ΔK ≈ ΔK_th` are built algebraically from the exact inve
 rather than from decimal literals, and are asserted on **normalised ratios** —
 `pytest.approx` with a default absolute tolerance is unsafe on quantities whose
 difference approaches zero.
+
+Milestone 5 adds an eighth leg:
+
+8. **Sequential-integrity checks.** A one-block spectrum reproduces the verified
+   constant-amplitude life to 6 × 10⁻¹⁰; each block advance round-trips through
+   the life integral back to its requested cycle count; the crack length is
+   asserted continuous across block boundaries; total cycles are asserted equal
+   to the summed executed block cycles (never a damage sum); an arrested block
+   is shown to consume cycles while producing exactly zero growth; and a block
+   arrested at `a₀` is shown to activate at a larger crack. A fourth regression
+   module locks the Milestone 4 threshold results.
+
+### Numerical resolution of a spectrum answer
+
+Two settings matter and behave differently:
+
+- **Interval count** barely matters. A block advances the crack only slightly, so
+  the log-grid rule is already near-exact over that span: 50, 100, 200 and 400
+  intervals give an identical total cycle count and an identical final crack
+  length to nine decimal places in mm. The default is 50.
+- **Block-solve tolerance** sets the accuracy. At 10⁻⁶ m the canonical answer
+  shifts by a whole spectrum; from 10⁻⁸ m down it is stable.
+
+The deeper point is that a spectrum answer is **quantised to whole blocks**. One
+canonical spectrum is 11 100 cycles = 0.177 % of the life, and fracture is
+detected when a block *begins* or partway through it. Differences below one
+spectrum are therefore not resolvable in a cycles-to-fracture comparison — which
+is exactly why the sequence-order study is conducted on crack length after a
+fixed number of spectra instead.
 
 ### A note on quadrature span
 
@@ -1153,6 +1280,159 @@ Width acts only through `Y(a₀)`: from `W` = 40 to 500 mm the ratio moves just
 0.15 % (1.403413 → 1.401262), so no width in that sweep crosses the threshold,
 though the life still moves strongly through `a_c`.
 
+## Representative result — Milestone 5 (variable amplitude)
+
+Canonical illustrative spectrum: a 100 : 10 : 1 exceedance shape, ordered low →
+manoeuvre → severe, applied to the same panel, Paris curve, toughness and
+threshold. 11,100 cycles per spectrum.
+
+> **ILLUSTRATIVE VARIABLE-AMPLITUDE STRESS SPECTRUM — NOT FLIGHT LOAD DATA.**
+> Invented for this study; not measured, not a certification or gust spectrum,
+> not traceable to any aircraft, manufacturer or regulator.
+
+| Block | `σ_max` [MPa] | `Δσ` [MPa] | Count | `ΔK(a₀)` [MPa·√m] | State at `a₀` | `a_th` [mm] | `a_c` [mm] |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A low-amplitude | 70 | 50 | 10 000 | 2.8032 | **ARRESTED** | 2.0330 | 31.7358 |
+| B manoeuvre | 110 | 90 | 1 000 | 5.0457 | ACTIVE | 0.6286 | 19.4092 |
+| C severe gust | 150 | 130 | 100 | 7.2883 | ACTIVE | 0.3013 | **11.8589** |
+
+The severe block has the **smallest** fracture boundary and governs fracture;
+the low block starts below threshold and contributes nothing at first.
+
+| Life result | Value |
+| --- | --- |
+| Status | `FRACTURE_REACHED` |
+| Full spectra completed | 565 |
+| Partial spectrum | 11 000 cycles |
+| **Total cycles** | **6 282 500** |
+| Final crack length | 12.0031 mm |
+| Total crack extension | 11.0031 mm |
+| Fracture block | C severe gust (index 2, repeat 566) |
+| Cycle within that block | **0.0000** of 100 |
+| `K_max` at fracture | 30.2087 MPa·√m |
+| Utilization | 1.006957 |
+
+**Fracture occurs at cycle 0 of the severe block.** The crack was pushed past
+the severe block's 11.86 mm boundary by the two milder blocks earlier in the
+*same* pass — neither of which fractures at that size, because their own
+boundaries are 19.4 and 31.7 mm. The severe block then fractures on its very
+first cycle. This is precisely why fracture must be checked per block, in
+sequence, rather than against a single envelope.
+
+## Growth contribution by block
+
+Crack-extension contribution — **not** Miner damage.
+
+| Block | Executions | Cycles | Extension [mm] | Share | First active | Max `ΔK` [MPa·√m] | Triggered fracture |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A low-amplitude | 566 | 5 660 000 | 5.65492 | **51.4 %** | repeat 359 | 10.041 | no |
+| B manoeuvre | 566 | 566 000 | 4.12036 | 37.5 % | repeat 1 | 18.125 | no |
+| C severe gust | 566 | 56 500 | 1.22783 | 11.2 % | repeat 1 | 26.181 | **yes** |
+
+The low block starts **arrested**, activates only at repeat 359 once the crack
+reaches its 2.03 mm threshold size — and then becomes the **largest single
+contributor** to crack extension. A block cannot be classified as irrelevant from
+its state at `a₀`; the threshold verdict is recomputed on every execution.
+
+## Threshold on/off, and the constant-amplitude regression
+
+| Case | Cycles | Spectra |
+| --- | --- | --- |
+| Threshold enabled | 6 282 500 | 565 |
+| Threshold disabled (`threshold=None`) | 4 018 100 | 361 |
+
+Disabling the threshold **shortens** the predicted life by 36 %, because the low
+block then grows the crack from the very first pass.
+
+A spectrum of one repeated block must reproduce the verified constant-amplitude
+answer, and does — the strongest Milestone 5 regression:
+
+| | Cycles |
+| --- | --- |
+| Single-block spectrum (10 000-cycle block) | 842 070.5523 |
+| Milestone 3/4 direct | 842 070.5528 |
+| Relative difference | 6.2 × 10⁻¹⁰ |
+
+## Sequence-order study
+
+Same blocks, same counts, different order. Compared by **crack length after a
+fixed number of spectra**, which removes the block-granularity quantisation that
+a cycles-to-fracture comparison would carry.
+
+| Order | Crack after 200 spectra | Crack after 400 spectra |
+| --- | --- | --- |
+| A→B→C | 1.4419600 mm | 2.610895717 mm |
+| C→B→A | +5 × 10⁻⁹ | +0.358 % |
+| B→A→C | +0 | +0.358 % |
+| C→A→B | +5 × 10⁻⁹ | +0.358 % |
+
+**Before** the low block activates (~repeat 359) the orderings agree to 1 part
+in 10⁸ — the model is effectively order-independent, as pure Paris growth over
+always-active blocks should be. **After** activation a real but small effect
+appears: running the low block **first** catches it at the smallest crack of each
+pass, where it is most often still arrested, so it contributes less growth.
+
+The sequence effect here arises **only** from evolving crack size, threshold
+activation and per-block fracture checks. It does **not** include overload
+retardation, residual stress, crack-closure memory or plasticity history — the
+only state carried between blocks is the crack length.
+
+Measured on **cycles to fracture** instead, the orderings differ by 0.175–0.177 %
+— which is one spectrum (11 100 cycles = 0.1767 % of life). The answer is
+quantised to whole blocks, so differences below one spectrum are not resolvable
+in that metric.
+
+## Spectrum sensitivity
+
+**Severe-block count** (stress levels fixed):
+
+| Count | Spectra | Cycles | Fracture block |
+| --- | --- | --- | --- |
+| 0 (removed) | 725 | 7 985 415 | **B manoeuvre** |
+| 10 | 678 | 7 475 780 | C severe gust |
+| 50 | 622 | 6 884 100 | C severe gust |
+| 100 | 564 | 6 271 400 | C severe gust |
+| 200 | 478 | 5 364 600 | C severe gust |
+
+Removing the severe block moves fracture to the manoeuvre block and lengthens
+the life: the governing boundary becomes 19.4 mm instead of 11.9 mm.
+
+**Threshold** (discontinuous, so not a smooth trend):
+
+| `ΔK_th` [MPa·√m] | Active at `a₀` | Activate later | Cycles | Status |
+| --- | --- | --- | --- | --- |
+| disabled | 3/3 | 0 | 4 018 100 | `FRACTURE_REACHED` |
+| 2.0 | 3/3 | 0 | 4 018 100 | `FRACTURE_REACHED` |
+| 3.0 | 2/3 | 1 | 4 517 600 | `FRACTURE_REACHED` |
+| 4.0 | 2/3 | 1 | 6 271 400 | `FRACTURE_REACHED` |
+| 5.0 | 2/3 | 1 | 7 325 900 | `FRACTURE_REACHED` |
+| 6.0 | 1/3 | 2 | 15 007 100 | `FRACTURE_REACHED` |
+| 8.0 | 0/3 | 0 | ∞ | `SPECTRUM_ARRESTED` |
+
+A threshold below every block's `ΔK(a₀)` changes nothing at all; a high enough
+one arrests the entire spectrum.
+
+**Initial flaw**:
+
+| `a₀` [mm] | Active at `a₀` | Activate later | Cycles | Status |
+| --- | --- | --- | --- | --- |
+| 0.25 | 0/3 | 0 | ∞ | `SPECTRUM_ARRESTED` |
+| 0.50 | 1/3 | 2 | 18 514 700 | `FRACTURE_REACHED` |
+| 1.00 | 2/3 | 1 | 6 271 400 | `FRACTURE_REACHED` |
+| 2.00 | 2/3 | 1 | 2 386 400 | `FRACTURE_REACHED` |
+| 4.00 | 3/3 | 0 | 1 165 400 | `FRACTURE_REACHED` |
+
+**Low-block count** — the counter-intuitive one. Adding cycles of a block that is
+*arrested* adds cycles without adding growth, so total cycles to fracture **rise**
+(921 777 with the block removed → 21 564 100 at 50 000 cycles) even though the
+number of spectra needed **falls** (837 → 421). More low-amplitude cycles do not
+necessarily shorten the life measured in total cycles.
+
+Stress scale (0.75 → 1.25) shortens life monotonically, 24 275 600 → 2 364 200
+cycles. Toughness (20 → 50 MPa·√m) lengthens it with diminishing returns,
+5 549 900 → 6 682 100. Width (50 → 500 mm) lengthens it and converges,
+6 005 000 → 6 393 500.
+
 ## Milestone 1 stress-range sensitivity (imposed endpoint)
 
 Both `σ_max` and `σ_min` are scaled, preserving `R` and varying only `Δσ`.
@@ -1196,6 +1476,10 @@ method and its output is **not** an inspection or safe-life interval.
 >
 > **A threshold-arrested result is not a safe-life certification result; it only
 > means the modeled `ΔK` does not exceed the assumed constant `ΔK` threshold.**
+>
+> **Sequence effects in this milestone arise only from evolving crack size,
+> threshold activation, and block-specific fracture checks; the model does not
+> represent overload retardation or other load-history memory.**
 
 - **LEFM only** — small-scale yielding assumed throughout.
 - **Centre crack only** — no edge crack, no fastener-hole crack, no corner or
@@ -1229,6 +1513,19 @@ method and its output is **not** an inspection or safe-life interval.
   nothing about crack initiation, and covers no corrosion or fretting damage.
 - The Milestone 1–3 growth path applies **no threshold at all** and is retained
   deliberately as the regression baseline.
+- **The spectrum is illustrative, not measured flight data.** No aircraft,
+  certification spectrum, gust standard, manufacturer loads or regulatory load
+  history is claimed.
+- **Blocks are piecewise constant.** There is no rainflow extraction, no
+  arbitrary time-history input, and no cycle-by-cycle stress variability within
+  a block.
+- **No overload retardation**, no Wheeler/Willenborg model, no crack-closure
+  memory, no residual-stress history and no plastic-zone history.
+- **No interaction between consecutive blocks beyond the evolving crack size.**
+  The crack length is the only state carried forward — a deliberately strong
+  restriction, and the reason the measured sequence effect is small here.
+- **No inspection or maintenance model**, and no damage-tolerance interval is
+  derived from any of this.
 - **No fracture-toughness cutoff.**
 - **No residual-strength model.**
 - **Constant `K_IC`** — a single value, with no thickness or state-of-stress
@@ -1324,6 +1621,12 @@ Run the Milestone 4 study (threshold screen):
 python examples/crack_growth_threshold.py
 ```
 
+Run the Milestone 5 study (variable-amplitude spectrum, takes about 30 s):
+
+```bash
+python examples/variable_amplitude_spectrum.py
+```
+
 ## Minimal usage
 
 ```python
@@ -1407,6 +1710,27 @@ print(arrested.state)              # GrowthState.ARRESTED_BELOW_THRESHOLD
 print(arrested.predicted_cycles)   # inf
 
 # Pass threshold=None to disable the screen and reproduce Milestone 3.
+```
+
+Running a repeating variable-amplitude spectrum:
+
+```python
+from crackgrowth import (
+    CANONICAL_SPECTRUM, SpectrumBlock, LoadSpectrum,
+    simulate_repeated_spectrum,
+)
+
+result = simulate_repeated_spectrum(
+    1.0e-3, CANONICAL_SPECTRUM, panel, law, toughness, threshold
+)
+print(result.status)                  # SpectrumStatus.FRACTURE_REACHED
+print(result.total_cycles)            # 6282500.0  -- actual stress cycles
+print(result.completed_full_spectra)  # 565
+print(result.fracture_block_name)     # 'C severe gust'
+print(result.fracture_cycle_within_block)  # 0.0 -- fractures as the block begins
+
+for c in result.contributions:        # crack extension, NOT Miner damage
+    print(c.block_name, c.extension_fraction, c.first_active_repeat)
 ```
 
 ## License

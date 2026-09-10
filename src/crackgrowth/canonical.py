@@ -24,6 +24,11 @@ from __future__ import annotations
 
 from .finite_width import FiniteWidthCenterCrack
 from .fracture import ILLUSTRATIVE_ALUMINIUM_LIKE_TOUGHNESS
+from .spectrum import (
+    ILLUSTRATIVE_SPECTRUM_DISCLAIMER,
+    LoadSpectrum,
+    SpectrumBlock,
+)
 from .threshold import ILLUSTRATIVE_ALUMINIUM_LIKE_THRESHOLD
 from .geometry import INFINITE_PLATE_THROUGH_CRACK
 from .loading import StressCycle
@@ -39,6 +44,7 @@ __all__ = [
     "CANONICAL_PLATE_WIDTH",
     "CANONICAL_FINITE_WIDTH_GEOMETRY",
     "CANONICAL_GROWTH_THRESHOLD",
+    "CANONICAL_SPECTRUM",
 ]
 
 CANONICAL_GEOMETRY = INFINITE_PLATE_THROUGH_CRACK
@@ -82,3 +88,45 @@ CANONICAL_FINITE_WIDTH_GEOMETRY = FiniteWidthCenterCrack(
 #: 4 MPa*sqrt(m) gives a threshold ratio of 1.40 at a0 and a threshold crack
 #: size of 0.51 mm, so a genuine active-growth interval exists.
 CANONICAL_GROWTH_THRESHOLD = ILLUSTRATIVE_ALUMINIUM_LIKE_THRESHOLD
+
+#: Canonical illustrative variable-amplitude spectrum (Milestone 5).
+#:
+#: Three blocks in a 100 : 10 : 1 exceedance shape -- many low-amplitude
+#: background cycles, fewer manoeuvre cycles, a handful of severe gusts.
+#: Chosen after auditing the per-block boundaries at W = 100 mm, a0 = 1 mm,
+#: K_IC = 30 MPa*sqrt(m) and delta_K_th = 4 MPa*sqrt(m): the low block starts
+#: ARRESTED (delta_K = 2.80 < 4) and activates once the crack reaches
+#: 2.03 mm, while the severe block has the smallest fracture boundary
+#: (11.86 mm) and therefore governs fracture. Counts were scaled to keep the
+#: repeat count practical; they were not tuned to force a result.
+CANONICAL_SPECTRUM = LoadSpectrum(
+    blocks=(
+        SpectrumBlock(
+            name="A low-amplitude",
+            stress_cycle=StressCycle(sigma_max=70.0e6, sigma_min=20.0e6),
+            cycle_count=10_000,
+        ),
+        SpectrumBlock(
+            name="B manoeuvre",
+            stress_cycle=StressCycle(sigma_max=110.0e6, sigma_min=20.0e6),
+            cycle_count=1_000,
+        ),
+        SpectrumBlock(
+            name="C severe gust",
+            stress_cycle=StressCycle(sigma_max=150.0e6, sigma_min=20.0e6),
+            cycle_count=100,
+        ),
+    ),
+    name="Illustrative three-block wing-skin spectrum",
+    source_note=(
+        ILLUSTRATIVE_SPECTRUM_DISCLAIMER
+        + ": a three-block 100:10:1 exceedance shape invented for this study. Not measured, not a certification or gust spectrum, not traceable to any "
+        "aircraft, manufacturer or regulator, and no specific alloy or type is "
+        "claimed."
+    ),
+    notes=(
+        "Ordered low -> manoeuvre -> severe. Order is significant because the "
+        "crack length evolves between blocks; the spectrum is never sorted or "
+        "merged."
+    ),
+)

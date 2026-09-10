@@ -20,6 +20,12 @@ as a HARD CUTOFF, distinguishing a crack that is actively growing from one that
 is arrested below threshold or already at the fracture boundary. The
 no-threshold Paris path remains available and unchanged.
 
+Milestone 5: deterministic variable-amplitude growth through an ORDERED block
+spectrum, repeated until fracture. Each block carries its own threshold verdict
+and its own fracture boundary, and the crack length is the only state carried
+between blocks. This is sequential Paris growth, NOT Miner's rule: no cumulative
+damage sum is formed anywhere.
+
 All quantities are SI internally:
 
 ===============================  ==========================================
@@ -43,7 +49,43 @@ from .canonical import (
     CANONICAL_INITIAL_CRACK_LENGTH,
     CANONICAL_PARIS_LAW,
     CANONICAL_PLATE_WIDTH,
+    CANONICAL_SPECTRUM,
     CANONICAL_TARGET_CRACK_LENGTH,
+)
+from .spectrum import (
+    ILLUSTRATIVE_SPECTRUM_DISCLAIMER,
+    LoadSpectrum,
+    SpectrumBlock,
+)
+from .spectrum_growth import (
+    DEFAULT_BLOCK_INTERVALS,
+    DEFAULT_BLOCK_MAX_ITERATIONS,
+    BlockAdvanceResult,
+    BlockAdvanceStatus,
+    advance_crack_through_block,
+)
+from .spectrum_life import (
+    DEFAULT_MAX_HISTORY_RECORDS,
+    DEFAULT_MAX_SPECTRUM_REPEATS,
+    BlockContribution,
+    BlockExecution,
+    SpectrumCrackGrowthResult,
+    SpectrumStatus,
+    block_boundary_table,
+    minimum_block_critical_crack_length,
+    simulate_repeated_spectrum,
+)
+from .spectrum_sensitivity import (
+    SpectrumPoint,
+    active_block_count,
+    block_count_sensitivity,
+    initial_flaw_sensitivity_under_spectrum,
+    scaled_spectrum,
+    spectrum_scale_sensitivity,
+    spectrum_with_block_count,
+    threshold_sensitivity_under_spectrum,
+    toughness_sensitivity_under_spectrum,
+    width_sensitivity_under_spectrum,
 )
 from .threshold import (
     ILLUSTRATIVE_ALUMINIUM_LIKE_THRESHOLD,
@@ -179,7 +221,7 @@ from .sensitivity import (
 )
 from .stress_intensity import delta_stress_intensity, stress_intensity
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "__version__",
@@ -313,4 +355,35 @@ __all__ = [
     "max_stress_sensitivity_with_threshold",
     "width_sensitivity_with_threshold",
     "toughness_sensitivity_with_threshold",
+    # variable-amplitude spectrum (Milestone 5)
+    "SpectrumBlock",
+    "LoadSpectrum",
+    "CANONICAL_SPECTRUM",
+    "ILLUSTRATIVE_SPECTRUM_DISCLAIMER",
+    "BlockAdvanceStatus",
+    "BlockAdvanceResult",
+    "advance_crack_through_block",
+    "DEFAULT_BLOCK_INTERVALS",
+    "DEFAULT_BLOCK_MAX_ITERATIONS",
+    # repeated-spectrum simulation (Milestone 5)
+    "SpectrumStatus",
+    "BlockExecution",
+    "BlockContribution",
+    "SpectrumCrackGrowthResult",
+    "simulate_repeated_spectrum",
+    "block_boundary_table",
+    "minimum_block_critical_crack_length",
+    "DEFAULT_MAX_SPECTRUM_REPEATS",
+    "DEFAULT_MAX_HISTORY_RECORDS",
+    # spectrum sensitivity (Milestone 5)
+    "SpectrumPoint",
+    "scaled_spectrum",
+    "spectrum_with_block_count",
+    "active_block_count",
+    "spectrum_scale_sensitivity",
+    "block_count_sensitivity",
+    "threshold_sensitivity_under_spectrum",
+    "toughness_sensitivity_under_spectrum",
+    "width_sensitivity_under_spectrum",
+    "initial_flaw_sensitivity_under_spectrum",
 ]
